@@ -23,11 +23,13 @@ import gc
 
 
 
-data_dir = "/mnt/ssd-2/jamescampbell3"
+#data_dir = "/mnt/ssd-2/jamescampbell3"
+data_dir = "/Users/james/code/llama-lying"
 
-inference_honest_path = "data/large_run_6/inference_outputs/inference_output_6_honest.csv"
+#inference_honest_path = "data/large_run_6/inference_outputs/inference_output_6_honest.csv"
+inference_honest_path = "data/large_run_1305/inference_outputs/inference_output_1305_honest.csv"
 
-inference_liar_path = "data/large_run_6/inference_outputs/inference_output_6_liar.csv"
+inference_liar_path = "data/large_run_1306/inference_outputs/inference_output_1306_liar.csv"
 
 inference_animal_liar_path = "data/large_run_7/inference_outputs/inference_output_7_animal_liar.csv"
 
@@ -626,4 +628,4 @@ def get_best_head(transfer_accs, split_idx):
     indices = (index // transfer_accs.size(1), index % transfer_accs.size(1))
     return (indices[0].item(), indices[1].item())
 
-# %%
+
