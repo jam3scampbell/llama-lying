@@ -352,7 +352,7 @@ def iterate_patching():
 
         print(f"Patching layers {i} through {i+1} -----------------")
         print("patcher: ",compute_acc(patcher))
-        print("patched: ",compute_acc(patcher))
+        print("patched: ",compute_acc(patched))
         print("unpatched: ",compute_acc(unpatched))
 
 
