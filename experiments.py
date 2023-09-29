@@ -184,7 +184,7 @@ false_ids = [7700, 8824, 2089, 4541]
 # %%
 dataset = load_dataset("notrichardren/azaria-mitchell", split="combined")
 dataset = [row for row in dataset if row['dataset'] == 'facts']
-dataset = dataset[:100]
+# dataset = dataset[:200]
 # assumes fields are ['claim','label','dataset','qa_type','ind']
 loader = DataLoader(dataset, batch_size=1, shuffle=False)
 
@@ -196,7 +196,8 @@ model.eval()
 
 # %%
 
-seq_positions = torch.arange(-45,0).tolist()
+#seq_positions = torch.arange(-45,0).tolist()
+seq_positions = [-1]
 
 activation_buffer_z = torch.zeros((len(seq_positions), n_layers, d_model), dtype=torch.float16) #z for every head at every layer
 
@@ -260,24 +261,89 @@ def create_write_z_hook_pairs(attn_heads: List[Tuple[int, int]]=[(20,20)]): #tup
 
 
 class PatchInfo:
-    def __init__(self, prompt_mode, intervention, hook_pairs):
+    def __init__(self, prompt_mode, intervention, hook_pairs, desc=""):
         self.prompt_mode = prompt_mode
         self.intervention = intervention
+        self.desc = desc
         self.hook_pairs = hook_pairs
         self.preds = {}
 
-cache_z_hook_pairs = create_cache_z_hook_pairs()
-heads_to_patch = [(l, h) for l in range(0,40) for h in range(n_heads)]
-write_z_hook_pairs = create_write_z_hook_pairs(heads_to_patch)
+# cache_z_hook_pairs = create_cache_z_hook_pairs()
+# heads_to_patch = [(l, h) for l in range(0,40) for h in range(n_heads)]
+# write_z_hook_pairs = create_write_z_hook_pairs(heads_to_patch)
 
-patcher = PatchInfo("honest", "cache", cache_z_hook_pairs)
-patched = PatchInfo("liar", "write", write_z_hook_pairs)
-unpatched = PatchInfo("liar", "None", [])
+# patcher = PatchInfo("honest", "cache", cache_z_hook_pairs)
+# patched = PatchInfo("liar", "write", write_z_hook_pairs)
+# unpatched = PatchInfo("liar", "None", [])
+
+def activation_patching(patcher: PatchInfo, patched_list: List[PatchInfo], patcher_acts_exist=False):
+    global activation_buffer_z
+    #first run patcher through whole dataset and save activations
+    if not patcher_acts_exist:
+        for idx, batch in tqdm(enumerate(loader)): 
+            statement = batch['claim'][0] 
+            torch.cuda.empty_cache()
+            #dialog_tokens = llama_prompt(prompt_mode_to_system_prompt[turn.prompt_mode], statement)
+            dialog_tokens = create_prompt(prompt_mode_to_system_prompt[patcher.prompt_mode], statement)
+            # ONLY KEEP FOR SMALL MODELS
+            #assistant_answer = "Sure. The statement is"
+            #assistant_answer = model.tokenizer.encode(assistant_answer) #, bos=False, eos=False)
+            #dialog_tokens = dialog_tokens + assistant_answer[1:]
+            # ONLY KEEP FOR SMALL MODELS
+            input_ids = torch.tensor(dialog_tokens).unsqueeze(dim=0).to(device)        
+            with torch.no_grad():
+                with hmodel.post_hooks(fwd=patcher.hook_pairs):
+                    output = hmodel(input_ids)
+
+            output = output['logits'][:,-1,:].cpu() #last sequence position
+            output = torch.nn.functional.softmax(output, dim=-1)
+            output_probs = output #FOR DEBUGGING!!!
+
+            output = output.squeeze()
+            true_prob = output[true_ids].sum().item()
+            false_prob = output[false_ids].sum().item()
+
+            patcher.preds[batch['ind'].item()] = (true_prob, false_prob, batch['label'].item())
+            
+            acts_path = f"{save_dir}/activations"
+            os.makedirs(acts_path, exist_ok=True)
+            torch.save(activation_buffer_z, f"{acts_path}/activation_buffer_{patcher.prompt_mode}_{idx}.pt")
+    #next loop through patched models loading the buffers at every iteration
+    for idx, batch in tqdm(enumerate(loader)): 
+        activation_buffer_z = torch.load(f"{acts_path}/activation_buffer_{patcher.prompt_mode}_{idx}.pt")
+        for patched in patched_list:
+            statement = batch['claim'][0] 
+            torch.cuda.empty_cache()
+            #dialog_tokens = llama_prompt(prompt_mode_to_system_prompt[turn.prompt_mode], statement)
+            dialog_tokens = create_prompt(prompt_mode_to_system_prompt[patched.prompt_mode], statement)
+            # ONLY KEEP FOR SMALL MODELS
+            #assistant_answer = "Sure. The statement is"
+            #assistant_answer = model.tokenizer.encode(assistant_answer) #, bos=False, eos=False)
+            #dialog_tokens = dialog_tokens + assistant_answer[1:]
+            # ONLY KEEP FOR SMALL MODELS
+            input_ids = torch.tensor(dialog_tokens).unsqueeze(dim=0).to(device)        
+            with torch.no_grad():
+                with hmodel.pre_hooks(fwd=patched.hook_pairs):
+                    output = hmodel(input_ids)
+
+            output = output['logits'][:,-1,:].cpu() #last sequence position
+            output = torch.nn.functional.softmax(output, dim=-1)
+
+            output = output.squeeze()
+            true_prob = output[true_ids].sum().item()
+            false_prob = output[false_ids].sum().item()
+
+            patched.preds[batch['ind'].item()] = (true_prob, false_prob, batch['label'].item())
+            
+        
 
 
-def activation_patching(patcher: PatchInfo, patched: PatchInfo, unpatched: PatchInfo):
 
 
+
+
+
+def activation_patching_quick(patcher: PatchInfo, patched: PatchInfo, unpatched: PatchInfo):
     for batch in tqdm(loader):
         statement = batch['claim'][0] #batch['claim'] gives a list, ints are wrapped in tensors
         torch.cuda.empty_cache()
@@ -335,28 +401,79 @@ def compute_acc(patch_obj: PatchInfo, threshold=.5):
             pred = true_prob > false_prob
             correct = (pred == label) 
             numer += correct
-    return numer/denom
+    if denom == 0:
+        return 0, 0
+    return numer/denom, denom
 
 #actually we want to match predictions, not accuracy. Success is being wrong twice in the same direction.
 def iterate_patching():
-    for i in [0,10,20,30,40,50,60,70]:
-        cache_z_hook_pairs = create_cache_z_hook_pairs()
-        heads_to_patch = [(l, h) for l in range(i,i+1) for h in range(n_heads)]
+    cache_z_hook_pairs = create_cache_z_hook_pairs()
+    patcher = PatchInfo("honest", "cache", cache_z_hook_pairs)
+    patched_list = []
+    for i in range(n_heads):
+        heads_to_patch = [(30, h) for h in range(n_heads) if not (h in [i])]
         write_z_hook_pairs = create_write_z_hook_pairs(heads_to_patch)
+        patched = PatchInfo("liar", "write", write_z_hook_pairs, desc=f"Patching layers {i} through {i+1}")
+        patched_list.append(patched)
+    unpatched = PatchInfo("liar", "None", [], desc="unpatched")
+    patched_list.append(unpatched)
 
-        patcher = PatchInfo("honest", "cache", cache_z_hook_pairs)
-        patched = PatchInfo("liar", "write", write_z_hook_pairs)
-        unpatched = PatchInfo("liar", "None", [])
+    activation_patching(patcher, patched_list)
 
-        activation_patching(patcher, patched, unpatched)
+    print("patcher: ",compute_acc(patcher))
+    for patched in patched_list:
+        print(patched.desc,": ",compute_acc(patched))
 
-        print(f"Patching layers {i} through {i+1} -----------------")
-        print("patcher: ",compute_acc(patcher))
-        print("patched: ",compute_acc(patched))
-        print("unpatched: ",compute_acc(unpatched))
+    return patcher, patched_list
+
+def patch_one_at_a_time():
+    patcher_p = PatchInfo("honest", "cache", create_cache_z_hook_pairs())
+    heads_to_patch = [(30, h) for h in [8, 9, 11, 12, 15]]
+    write_z_hook_pairs = create_write_z_hook_pairs(heads_to_patch)
+    patched_p = PatchInfo("liar", "write", write_z_hook_pairs)
+    unpatched_p = PatchInfo("liar", "None", [], desc="unpatched")
+
+    activation_patching_quick(patcher_p, patched_p, unpatched_p)
+
+    # one = compute_acc(patcher_p)
+    # two = compute_acc(patched_p)
+    # three = compute_acc(unpatched_p)
+    return patcher_p, patched_p, unpatched_p
 
 
+def plot_against_confidence_threshold(patcher, patched, unpatched, patch_desc="patched layer l"):
+    accs_honest = []
+    accs_liar = []
+    totals_honest = []
+    totals_liar = []
+    accs_third = []
+    totals_third = []
+    threshs = torch.arange(0,1,.03).tolist()#[0, .1, .2, .3, .4, .5, .6, .7, .8, .9]
+    for thresh in threshs:
+        acc_honest, total_honest = compute_acc(patcher, threshold = thresh)
+        accs_honest.append(acc_honest)
+        totals_honest.append(total_honest)
+        acc_liar, total_liar = compute_acc(patched, threshold = thresh)
+        accs_liar.append(acc_liar)
+        totals_liar.append(total_liar)
+        
+        acc_third, total_third = compute_acc(unpatched, threshold = thresh)
+        accs_third.append(acc_third)
+        totals_third.append(total_third)
 
+    plt.subplot(2,1,1)
+    plt.plot(threshs, accs_honest, label='honest')
+    plt.plot(threshs, accs_liar, label=patch_desc)
+    plt.plot(threshs, accs_third, label='unpatched')
+    plt.ylabel("accuracy")
+    plt.legend()
+    plt.subplot(2,1,2)
+    plt.plot(threshs, totals_honest, label='honest')
+    plt.plot(threshs, totals_liar, label=patch_desc)
+    plt.plot(threshs, totals_third, label='unpatched')
+    plt.ylabel("data points")
+    plt.legend()
+    plt.show()
 
 # %%
 def forward_pass(threshold = .5):
