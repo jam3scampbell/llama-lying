@@ -216,7 +216,8 @@ def cache_z_hook_fnc(module, input, output, name="", layer_num=0): #input of sha
 def write_z_pre_hook_fnc(module, input, name="", layer_num=0, head_num=0): #activation_buffer must be full (or can be empty for zero ablation)
     output = input[0]
     global activation_buffer_z
-    activation_buffer_z = activation_buffer_z.to(output.device)
+    activation_buffer_z = activation_buffer_z.to(output.device).to(output.dtype)
+    # print(f"{output.shape=}, {activation_buffer_z.shape=}")
     output[0,seq_positions,d_head*head_num:d_head*(head_num+1)] = activation_buffer_z[:,layer_num, d_head*head_num:d_head*(head_num+1)]
     return output
 
@@ -473,15 +474,18 @@ erased_z_cache_reformatted, _, _, _ = erase_data(reformatted_z_cache, labels=[ro
 erased_z_cache = return_to_original_cache_format(erased_z_cache_reformatted)
 
 # %%
-def activation_patching(patched_list: List[PatchInfo], patcher: PatchInfo=None, existing_cache=None):
+def activation_patching(patched_list: List[PatchInfo], patcher: PatchInfo=None, existing_cache=None, num_samples=None):
     global activation_buffer_z
     if existing_cache is None:
         existing_cache = get_clean_cache(patcher, loader=loader)
 
     #next loop through patched models loading the buffers at every iteration
-    for idx, batch in tqdm(enumerate(loader)): 
+    for idx, batch in enumerate(tqdm(loader)): 
+        if num_samples is not None and idx >= num_samples:
+            break
         # activation_buffer_z = torch.load(f"{acts_path}/activation_buffer_{patcher.prompt_mode}_{idx}.pt")
         activation_buffer_z = existing_cache[idx]
+        # print(f"{activation_buffer_z.shape=}")
         for patched in patched_list:
             statement = batch['claim'][0] 
             torch.cuda.empty_cache()
@@ -572,13 +576,13 @@ def compute_acc(patch_obj: PatchInfo, threshold=.5):
 
 #%%
 heads_to_patch = [(30, h) for h in [8, 9, 11, 12, 15]]
-def patch_leace_one_at_a_time(heads_to_patch):
+def patch_leace_one_at_a_time(heads_to_patch, mode="honest"):
     # patcher_p = PatchInfo("honest", "cache", create_cache_z_hook_pairs())
     write_z_hook_pairs = create_write_z_hook_pairs(heads_to_patch)
-    patched_p = PatchInfo("liar", "write", write_z_hook_pairs)
-    unpatched_p = PatchInfo("liar", "None", [], desc="unpatched")
+    patched_p = PatchInfo(mode, "write", write_z_hook_pairs)
+    unpatched_p = PatchInfo(mode, "None", [], desc="unpatched")
     
-    activation_patching([patched_p, unpatched_p], patcher=None, existing_cache=reformatted_z_cache)
+    activation_patching([patched_p, unpatched_p], patcher=None, existing_cache=erased_z_cache)
 
     # one = compute_acc(patcher_p)
     # two = compute_acc(patched_p)
@@ -660,6 +664,9 @@ def plot_against_confidence_threshold(patcher, patched, unpatched, patch_desc="p
     plt.ylabel("data points")
     plt.legend()
     plt.show()
+
+#%%
+plot_against_confidence_threshold(leace_patcher, patched_p, unpatched_p, patch_desc="patched layer l")
 
 # %%
 def forward_pass(threshold = .5):
