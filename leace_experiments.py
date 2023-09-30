@@ -48,8 +48,8 @@ weights_dir = f"/Users/james/code/Llama-2-70b-chat-hf"
 os.makedirs(weights_dir, exist_ok=True)
 
 
-checkpoint_location = snapshot_download(model_name, use_auth_token=api_key, local_dir=weights_dir, ignore_patterns=["*.safetensors", "model.safetensors.index.json"])
-# checkpoint_location = weights_dir
+# checkpoint_location = snapshot_download(model_name, use_auth_token=api_key, local_dir=weights_dir, ignore_patterns=["*.safetensors", "model.safetensors.index.json"])
+checkpoint_location = weights_dir
 
 
 with init_empty_weights():
@@ -187,6 +187,9 @@ dataset = [row for row in dataset if row['dataset'] == 'facts']
 # dataset = dataset[:200]
 # assumes fields are ['claim','label','dataset','qa_type','ind']
 loader = DataLoader(dataset, batch_size=1, shuffle=False)
+short_loader = DataLoader(dataset[:10], batch_size=1, shuffle=False)
+labels = [row['label'] for row in dataset]
+short_labels = [row['label'] for row in dataset[:10]]
 
 model.eval()
 
@@ -276,12 +279,13 @@ class PatchInfo:
 # patched = PatchInfo("liar", "write", write_z_hook_pairs)
 # unpatched = PatchInfo("liar", "None", [])
 
-def get_clean_cache(patcher):
-    activation_buffer_z = torch.zeros((len(seq_positions), n_layers, d_model), dtype=torch.float16)
+def get_clean_cache(patcher, loader=loader):
+    # activation_buffer_z = torch.zeros((len(seq_positions), n_layers, d_model), dtype=torch.float16)
+    global activation_buffer_z
     #first run patcher through whole dataset and save activations
 
     z_cache = {}
-    for idx, batch in tqdm(enumerate(loader)): 
+    for idx, batch in enumerate(tqdm(loader)): 
         statement = batch['claim'][0] 
         torch.cuda.empty_cache()
         #dialog_tokens = llama_prompt(prompt_mode_to_system_prompt[turn.prompt_mode], statement)
@@ -313,41 +317,171 @@ def get_clean_cache(patcher):
 
     return z_cache
 
-def activation_patching(patcher: PatchInfo, patched_list: List[PatchInfo], patcher_acts_exist=False):
+# %%
+leace_patcher = PatchInfo("honest", "cache", create_cache_z_hook_pairs())
+clean_z_cache = get_clean_cache(leace_patcher, loader=loader)
+
+def reorganize_cache(z_cache):
+    """
+    Initially, cache looks like dictionary of {idx: tensor}, where tensor is shape (seq_len, n_layers, d_model)
+    Convert to dictionary of layer_idx: tensor, where tensor is shape (n_samples, seq_len, d_model)
+    """
+    n_samples = len(z_cache)
+    seq_len = z_cache[0].shape[0]
+    assert z_cache[0].shape[1] == n_layers
+    d_model = z_cache[0].shape[2]
+    reorganized_cache = {}
+    for layer in range(n_layers):
+        reorganized_cache[layer] = torch.zeros((n_samples, seq_len, d_model))
+        for sample in range(n_samples):
+            reorganized_cache[layer][sample,:,:] = z_cache[sample][:, layer, :]
+    return reorganized_cache
+
+reformatted_z_cache = reorganize_cache(clean_z_cache)
+
+# also want to go back to original cache format
+def return_to_original_cache_format(reformatted_cache):
+    """
+    reformatted_cache is dictionary of layer_idx: tensor, where tensor is shape (n_samples, seq_len, d_model)
+    Convert to dictionary of {idx: tensor}, where tensor is shape (seq_len, n_layers, d_model)
+    """
+    n_samples = reformatted_cache[0].shape[0]
+    seq_len = reformatted_cache[0].shape[1]
+    d_model = reformatted_cache[0].shape[2]
+    original_cache = {}
+    for sample in range(n_samples):
+        original_cache[sample] = torch.zeros((seq_len, n_layers, d_model))
+        for layer in range(n_layers):
+            original_cache[sample][:, layer, :] = reformatted_cache[layer][sample,:,:]
+    return original_cache
+
+# %%
+from concept_erasure import LeaceEraser, LeaceFitter
+from concept_erasure.oracle import OracleEraser, OracleFitter
+from concept_erasure.quadratic import QuadraticEraser, QuadraticFitter
+
+# from utils.interp_utils import erase_data
+def erase_data(clean_cache, labels, probe_indices, in_place=False, test_probe=False, erase_seq_pos=None, oracle=True, quadratic=False, existing_fitters=None, return_fitters=False):
+    """
+    Take a clean_cache and concept-erase the head data.
+    probe_indices: list of tuples of (layer, head) (for z) or layer (for resid) to erase
+
+    if in_place, then the clean_cache is modified in place. 
+    Returns the new elements of clean_cache in a dictionary.
+
+    If test_probe, trains probes on the erased data to check if LEACE was performed perfectly.
+
+    erase_seq_pos is for if data has multiple seq positions, erase specific ones (takes an array e.g. [-3, -1])
+    
+    if oracle, use oracle eraser (i.e. erase with correct label). Otherwise, use LEACE.
+    if existing_fitters is not None, should be a dictionary with keys layer and value LeaceFitter objects.
+    if return_fitters, return the fitters used to erase the data.
+    """
+    n_samples = clean_cache[probe_indices[0]].shape[0]
+    labels = torch.tensor(labels)
+    assert len(labels) == n_samples, "labels must be same length as clean_cache"
+
+    output_cache = {}
+
+    def get_fitter(data, probe_index):
+        if existing_fitters is not None:
+            fitter = existing_fitters[probe_index]
+        else:
+            if oracle:
+                fitter = OracleFitter.fit(data, labels)
+            elif quadratic:
+                fitter = QuadraticFitter.fit(data, labels)
+            else:
+                fitter = LeaceFitter.fit(data, labels)
+        return fitter
+    
+    def get_erased(fitter, data):
+        if oracle or quadratic:
+            return fitter.eraser(data, labels)
+        else:
+            return fitter.eraser(data)
+
+    X_erased_cache = {}
+    if test_probe:
+        probes = {}
+
+    fitters = {}
+    for probe_index in tqdm(probe_indices):
+        clean_data = clean_cache[probe_index]
+
+        if len(clean_data.shape) > 2:
+            # There is another dimension, each seq pos
+            erased_data = torch.zeros_like(clean_data)
+            for seq_pos in range(clean_data.shape[1]):
+                # print(f"{clean_data[:, seq_pos, :].shape=}, {labels.shape=}")
+                # clean_data is shape (n_samples, seq_len, d_model)
+                # eraser = LeaceEraser.fit(clean_data[:, seq_pos, :], labels)
+
+                fitter = get_fitter(clean_data[:, seq_pos, :], probe_index)
+                erased_data[:, seq_pos, :] = get_erased(fitter, clean_data[:, seq_pos, :])
+
+                if return_fitters:
+                    fitters[probe_index] = {}
+                    fitters[probe_index][seq_pos] = fitter
+
+        else:
+            fitter = get_fitter(clean_data, probe_index)
+            erased_data = get_erased(fitter, clean_data)
+            if return_fitters:
+                fitters[probe_index] = fitter
+
+        if test_probe:
+            # train probe on final seq pos
+            if len(clean_data.shape) > 2:
+                X_erased = erased_data[:, -1, :]
+            else:
+                X_erased = erased_data
+
+            X_erased_cache[probe_index] = X_erased
+            null_lr = LogisticRegression(max_iter=1000).fit(X_erased, labels)
+            probes[probe_index] = null_lr
+            beta = torch.from_numpy(null_lr.coef_)
+            y_pred = null_lr.predict(X_erased)
+            accuracy = accuracy_score(labels, y_pred)
+            print(f"{beta.norm(p=torch.inf)=}, {accuracy=}")
+        # print(f"{erased_data.shape=}")
+
+        output_cache[probe_index] = torch.zeros_like(clean_cache[probe_index])
+        # for i in range(n_samples):
+        #     erased_sample = erased_data[i:i+1].numpy().astype(np.float16)
+        #     output_cache[probe_index][i] = np.zeros_like(clean_cache[probe_index][i])
+        #     if erase_seq_pos is not None:
+        #         output_cache[probe_index][i][:, erase_seq_pos] = erased_sample
+        #     else:
+        #         output_cache[probe_index][i][:] = erased_sample
+            # if in_place:
+            #     clean_cache[probe_index][i] = erased_sample
+        if erase_seq_pos is not None:
+            output_cache[probe_index][:, erase_seq_pos, :] = erased_data
+        else:
+            output_cache[probe_index] = erased_data
+    
+    return_output = (output_cache,)
+    if test_probe:
+        return_output += (probes, X_erased_cache)
+    if return_fitters:
+        return_output += (fitters,)
+    return return_output
+
+erased_z_cache_reformatted, _, _, _ = erase_data(reformatted_z_cache, labels=[row['label'] for row in dataset], probe_indices=[l for l in range(n_layers)], in_place=False, test_probe=True, oracle=True, quadratic=False, return_fitters=True)
+
+erased_z_cache = return_to_original_cache_format(erased_z_cache_reformatted)
+
+# %%
+def activation_patching(patched_list: List[PatchInfo], patcher: PatchInfo=None, existing_cache=None):
     global activation_buffer_z
-    #first run patcher through whole dataset and save activations
-    if not patcher_acts_exist:
-        for idx, batch in tqdm(enumerate(loader)): 
-            statement = batch['claim'][0] 
-            torch.cuda.empty_cache()
-            #dialog_tokens = llama_prompt(prompt_mode_to_system_prompt[turn.prompt_mode], statement)
-            dialog_tokens = create_prompt(prompt_mode_to_system_prompt[patcher.prompt_mode], statement)
-            # ONLY KEEP FOR SMALL MODELS
-            #assistant_answer = "Sure. The statement is"
-            #assistant_answer = model.tokenizer.encode(assistant_answer) #, bos=False, eos=False)
-            #dialog_tokens = dialog_tokens + assistant_answer[1:]
-            # ONLY KEEP FOR SMALL MODELS
-            input_ids = torch.tensor(dialog_tokens).unsqueeze(dim=0).to(device)        
-            with torch.no_grad():
-                with hmodel.post_hooks(fwd=patcher.hook_pairs):
-                    output = hmodel(input_ids)
+    if existing_cache is None:
+        existing_cache = get_clean_cache(patcher, loader=loader)
 
-            output = output['logits'][:,-1,:].cpu() #last sequence position
-            output = torch.nn.functional.softmax(output, dim=-1)
-            output_probs = output #FOR DEBUGGING!!!
-
-            output = output.squeeze()
-            true_prob = output[true_ids].sum().item()
-            false_prob = output[false_ids].sum().item()
-
-            patcher.preds[batch['ind'].item()] = (true_prob, false_prob, batch['label'].item())
-            
-            acts_path = f"{save_dir}/activations"
-            os.makedirs(acts_path, exist_ok=True)
-            torch.save(activation_buffer_z, f"{acts_path}/activation_buffer_{patcher.prompt_mode}_{idx}.pt")
     #next loop through patched models loading the buffers at every iteration
     for idx, batch in tqdm(enumerate(loader)): 
-        activation_buffer_z = torch.load(f"{acts_path}/activation_buffer_{patcher.prompt_mode}_{idx}.pt")
+        # activation_buffer_z = torch.load(f"{acts_path}/activation_buffer_{patcher.prompt_mode}_{idx}.pt")
+        activation_buffer_z = existing_cache[idx]
         for patched in patched_list:
             statement = batch['claim'][0] 
             torch.cuda.empty_cache()
@@ -370,13 +504,7 @@ def activation_patching(patcher: PatchInfo, patched_list: List[PatchInfo], patch
             true_prob = output[true_ids].sum().item()
             false_prob = output[false_ids].sum().item()
 
-            patched.preds[batch['ind'].item()] = (true_prob, false_prob, batch['label'].item())
-            
-        
-
-
-
-
+            patched.preds[batch['ind'].item()] = (true_prob, false_prob, batch['label'].item())        
 
 
 
@@ -442,6 +570,25 @@ def compute_acc(patch_obj: PatchInfo, threshold=.5):
         return 0, 0
     return numer/denom, denom
 
+#%%
+heads_to_patch = [(30, h) for h in [8, 9, 11, 12, 15]]
+def patch_leace_one_at_a_time(heads_to_patch):
+    # patcher_p = PatchInfo("honest", "cache", create_cache_z_hook_pairs())
+    write_z_hook_pairs = create_write_z_hook_pairs(heads_to_patch)
+    patched_p = PatchInfo("liar", "write", write_z_hook_pairs)
+    unpatched_p = PatchInfo("liar", "None", [], desc="unpatched")
+    
+    activation_patching([patched_p, unpatched_p], patcher=None, existing_cache=reformatted_z_cache)
+
+    # one = compute_acc(patcher_p)
+    # two = compute_acc(patched_p)
+    # three = compute_acc(unpatched_p)
+    return patched_p, unpatched_p
+
+patched_p, unpatched_p = patch_leace_one_at_a_time(heads_to_patch)
+
+#%%
+
 #actually we want to match predictions, not accuracy. Success is being wrong twice in the same direction.
 def iterate_patching():
     cache_z_hook_pairs = create_cache_z_hook_pairs()
@@ -477,6 +624,8 @@ def patch_one_at_a_time():
     # three = compute_acc(unpatched_p)
     return patcher_p, patched_p, unpatched_p
 
+
+#%%
 
 def plot_against_confidence_threshold(patcher, patched, unpatched, patch_desc="patched layer l"):
     accs_honest = []
