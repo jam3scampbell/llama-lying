@@ -42,3 +42,4 @@ protobuf==3.20.0
 sentencepiece
 transformers
 huggingface_hub
+git+https://github.com/EleutherAI/concept-erasure.git

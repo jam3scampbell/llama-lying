@@ -38,7 +38,8 @@ import einops
 model_name = "meta-llama/Llama-2-70b-chat-hf"
 api_key = "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"
 
-GPU_map = {0: "40GiB", 1: "40GiB", 2: "40GiB", 3: "40GiB", 4: "40GiB", 5: "40GiB", 6: "40GiB", 7: "40GiB"}
+# GPU_map = {0: "40GiB", 1: "40GiB", 2: "40GiB", 3: "40GiB", 4: "40GiB", 5: "40GiB", 6: "40GiB", 7: "40GiB"}
+GPU_map = {0: "90GiB", 1: "90GiB", 2: "90GiB", 3: "90GiB"}
 save_dir = os.getcwd()
 
 device = 0
@@ -318,11 +319,7 @@ def get_clean_cache(patcher, loader=loader):
 
     return z_cache
 
-# %%
-leace_patcher = PatchInfo("honest", "cache", create_cache_z_hook_pairs())
-clean_z_cache = get_clean_cache(leace_patcher, loader=loader)
-
-def reorganize_cache(z_cache):
+def reorganize_cache(z_cache, nested_dict=False):
     """
     Initially, cache looks like dictionary of {idx: tensor}, where tensor is shape (seq_len, n_layers, d_model)
     Convert to dictionary of layer_idx: tensor, where tensor is shape (n_samples, seq_len, d_model)
@@ -333,12 +330,15 @@ def reorganize_cache(z_cache):
     d_model = z_cache[0].shape[2]
     reorganized_cache = {}
     for layer in range(n_layers):
-        reorganized_cache[layer] = torch.zeros((n_samples, seq_len, d_model))
-        for sample in range(n_samples):
-            reorganized_cache[layer][sample,:,:] = z_cache[sample][:, layer, :]
+        if nested_dict:
+            reorganized_cache[layer] = {}
+            for sample in range(n_samples):
+                reorganized_cache[layer][sample] = z_cache[sample][:, layer, :].unsqueeze(0)
+        else:
+            reorganized_cache[layer] = torch.zeros((n_samples, seq_len, d_model))
+            for sample in range(n_samples):
+                reorganized_cache[layer][sample,:,:] = z_cache[sample][:, layer, :]
     return reorganized_cache
-
-reformatted_z_cache = reorganize_cache(clean_z_cache)
 
 # also want to go back to original cache format
 def return_to_original_cache_format(reformatted_cache):
@@ -355,6 +355,67 @@ def return_to_original_cache_format(reformatted_cache):
         for layer in range(n_layers):
             original_cache[sample][:, layer, :] = reformatted_cache[layer][sample,:,:]
     return original_cache
+
+#%%
+honest_patcher = PatchInfo("honest", "cache", create_cache_z_hook_pairs())
+honest_unformatted_cache = get_clean_cache(honest_patcher, loader=loader)
+liar_patcher = PatchInfo("liar", "cache", create_cache_z_hook_pairs())
+liar_unformatted_cache = get_clean_cache(liar_patcher, loader=loader)
+
+# with open(f"{save_dir}/honest_cache.pkl", "wb") as f:
+#     pickle.dump(honest_unformatted_cache, f)
+# with open(f"{save_dir}/liar_cache.pkl", "wb") as f:
+#     pickle.dump(liar_unformatted_cache, f)
+# %%
+# Train probes on z_cache
+
+def split_z_cache_heads(orig_cache):
+    """
+    Split cache, originally in the format of {sample idx: tensor}, where tensor is shape (seq_len, n_layers, d_model)
+    New cache should have keys as head indices, as (layer_idx, head_idx), and values as nested dictionary of key sample_idx, and shape (1, seq_len, d_head).
+    """
+    split_cache = {}
+    for sample_idx in orig_cache:
+        for layer_idx in range(n_layers):
+            for head_idx in range(n_heads):
+                if (layer_idx, head_idx) not in split_cache:
+                    split_cache[(layer_idx, head_idx)] = {}
+                split_cache[(layer_idx, head_idx)][sample_idx] = orig_cache[sample_idx][:, layer_idx, d_head*head_idx:d_head*(head_idx+1)].unsqueeze(0)
+    return split_cache
+
+
+from utils.new_probing_utils import ModelActsLargeSimple
+
+honest_cache = split_z_cache_heads(honest_unformatted_cache)
+liar_cache = split_z_cache_heads(liar_unformatted_cache)
+
+honest_modelact = ModelActsLargeSimple()
+honest_modelact.load_cache_acts(honest_cache, labels=labels, act_type="z", seq_pos=-1)
+honest_modelact.train_probes(act_type="z", verbose=True, train_ratio=.8, in_order=False)
+
+liar_modelact = ModelActsLargeSimple()
+liar_modelact.load_cache_acts(liar_cache, labels=labels, act_type="z", seq_pos=-1)
+liar_modelact.train_probes(act_type="z", verbose=True, train_ratio=.8, in_order=False)
+
+#%%
+from utils.analytics_utils import plot_z_probe_accuracies
+plot_z_probe_accuracies(honest_modelact.probe_accs["z"], n_layers=n_layers, n_heads=n_heads)
+
+# transfer accs between honest and liar
+train_acts = {"honest": honest_modelact, "liar": liar_modelact}
+test_acts = train_acts
+from utils.analytics_utils import plot_transfer_acc_subplots
+transfer_accs, fig = plot_transfer_acc_subplots(train_acts, test_acts)
+fig.show()
+with open(f"{save_dir}/transfer_accs.pkl", "wb") as f:
+    pickle.dump(transfer_accs, f)
+
+# %%
+leace_patcher = PatchInfo("honest", "cache", create_cache_z_hook_pairs())
+clean_z_cache = get_clean_cache(leace_patcher, loader=loader)
+
+reformatted_z_cache = reorganize_cache(clean_z_cache)
+
 
 # %%
 from concept_erasure import LeaceEraser, LeaceFitter
