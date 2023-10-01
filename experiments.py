@@ -33,7 +33,8 @@ import matplotlib.pyplot as plt
 import einops
 import wandb
 
-
+run = wandb.init(project=f"patching_layer_by_layer", reinit=True, config={"threshold":777, "data_size":777}, entity="jgc239", name=f"setup_wandb")
+run.finish()
 
 
 model_name = "meta-llama/Llama-2-70b-chat-hf"
@@ -356,7 +357,7 @@ def activation_patching(patcher: PatchInfo, patched_list: List[PatchInfo], patch
         #logging layer-by-layer plot
         if (idx+1)%100 == 0:
             for thresh in [.1,.2,.3,.4,.5]:
-                run = wandb.init(project=f"patching_layer_by_layer", reinit=True, config={"threshold":thresh, "data_size":idx}, name=f"layer_by_layer_thresh_{thresh}_data_{idx}")
+                run = wandb.init(project=f"patching_layer_by_layer", reinit=True, config={"threshold":thresh, "data_size":idx}, entity="jgc239", name=f"layer_by_layer_thresh_{thresh}_data_{idx}")
                 for patched_number, patched_obj in enumerate(patched_list):
                     acc, data_points = compute_acc(patched_obj, thresh)
                     wandb.log({"acc": acc, "remaining_data":data_points}, step=patched_number)
