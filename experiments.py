@@ -31,6 +31,7 @@ import pickle
 import numpy as np
 import matplotlib.pyplot as plt
 import einops
+import wandb
 
 
 
@@ -38,7 +39,7 @@ import einops
 model_name = "meta-llama/Llama-2-70b-chat-hf"
 api_key = "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"
 
-GPU_map = {0: "75GiB", 1: "75GiB", 2: "75GiB", 3: "75GiB"}
+GPU_map = {6: "40GiB", 7: "40GiB", 8: "40GiB", 9: "40GiB", 10: "40GiB", 11: "40GiB"}
 save_dir = os.getcwd()
 
 device = 0
@@ -268,6 +269,23 @@ class PatchInfo:
         self.hook_pairs = hook_pairs
         self.preds = {}
 
+
+def compute_acc(patch_obj: PatchInfo, threshold=.5):
+    denom = 0
+    numer = 0
+    for i in patch_obj.preds.keys():
+        true_prob = patch_obj.preds[i][0]
+        false_prob = patch_obj.preds[i][1]
+        label = patch_obj.preds[i][2]
+        if (true_prob > threshold or false_prob > threshold):
+            denom += 1
+            pred = true_prob > false_prob
+            correct = (pred == label) 
+            numer += correct
+    if denom == 0:
+        return 0, 0
+    return numer/denom, denom
+
 # cache_z_hook_pairs = create_cache_z_hook_pairs()
 # heads_to_patch = [(l, h) for l in range(0,40) for h in range(n_heads)]
 # write_z_hook_pairs = create_write_z_hook_pairs(heads_to_patch)
@@ -276,7 +294,7 @@ class PatchInfo:
 # patched = PatchInfo("liar", "write", write_z_hook_pairs)
 # unpatched = PatchInfo("liar", "None", [])
 
-def activation_patching(patcher: PatchInfo, patched_list: List[PatchInfo], patcher_acts_exist=False):
+def activation_patching(patcher: PatchInfo, patched_list: List[PatchInfo], patcher_acts_exist=False, use_wandb=False):
     global activation_buffer_z
     #first run patcher through whole dataset and save activations
     if not patcher_acts_exist:
@@ -334,7 +352,15 @@ def activation_patching(patcher: PatchInfo, patched_list: List[PatchInfo], patch
             false_prob = output[false_ids].sum().item()
 
             patched.preds[batch['ind'].item()] = (true_prob, false_prob, batch['label'].item())
-            
+
+        #logging layer-by-layer plot
+        if (idx+1)%100 == 0:
+            for thresh in [.1,.2,.3,.4,.5]:
+                run = wandb.init(project=f"patching_layer_by_layer", reinit=True, config={"threshold":thresh, "data_size":idx}, name=f"layer_by_layer_thresh_{thresh}_data_{idx}")
+                for patched_number, patched_obj in enumerate(patched_list):
+                    acc, data_points = compute_acc(patched_obj, thresh)
+                    wandb.log({"acc": acc, "remaining_data":data_points}, step=patched_number)
+                run.finish()            
         
 
 
@@ -389,24 +415,10 @@ def activation_patching_quick(patcher: PatchInfo, patched: PatchInfo, unpatched:
             # for tok, prob in zip(top_token_ids, probs):
             #     print(model.tokenizer.decode(tok)," : ",tok.item()," : " ,prob.item())
 
-def compute_acc(patch_obj: PatchInfo, threshold=.5):
-    denom = 0
-    numer = 0
-    for i in patch_obj.preds.keys():
-        true_prob = patch_obj.preds[i][0]
-        false_prob = patch_obj.preds[i][1]
-        label = patch_obj.preds[i][2]
-        if (true_prob > threshold or false_prob > threshold):
-            denom += 1
-            pred = true_prob > false_prob
-            correct = (pred == label) 
-            numer += correct
-    if denom == 0:
-        return 0, 0
-    return numer/denom, denom
+
 
 #actually we want to match predictions, not accuracy. Success is being wrong twice in the same direction.
-def iterate_patching():
+def iterate_patching(use_wandb=False):
     cache_z_hook_pairs = create_cache_z_hook_pairs()
     patcher = PatchInfo("honest", "cache", cache_z_hook_pairs)
     patched_list = []
@@ -418,7 +430,7 @@ def iterate_patching():
     unpatched = PatchInfo("liar", "None", [], desc="unpatched")
     patched_list.append(unpatched)
 
-    activation_patching(patcher, patched_list)
+    activation_patching(patcher, patched_list, use_wandb=use_wandb)
 
     print("patcher: ",compute_acc(patcher))
     for patched in patched_list:
@@ -427,12 +439,15 @@ def iterate_patching():
     return patcher, patched_list
 
 if __name__ == "__main__":
-    patcher, patched_list = iterate_patching()
+    patcher, patched_list = iterate_patching(use_wandb=True)
     for idx, patched_obj in enumerate(patched_list):
-        file_name = f"patched_{idx}.pkl"
+        file_name = f"patched_layer_{idx}.pkl"
         with open(file_name, "wb") as f:
             pickle.dump(file_name, f)
-        os.system(f"aws cp {file_name} s3://iti-capston/")
+
+    with open("patcher.pkl", "wb") as f:
+        pickle.dump("patcher.pkl", f)
+        #os.system(f"aws cp {file_name} s3://iti-capston/")
 
 def patch_one_at_a_time():
     patcher_p = PatchInfo("honest", "cache", create_cache_z_hook_pairs())
