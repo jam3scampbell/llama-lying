@@ -38,7 +38,7 @@ import einops
 model_name = "meta-llama/Llama-2-70b-chat-hf"
 api_key = "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"
 
-GPU_map = {0: "40GiB", 1: "40GiB", 2: "40GiB", 3: "40GiB", 4: "40GiB", 5: "40GiB", 6: "40GiB", 7: "40GiB"}
+GPU_map = {0: "75GiB", 1: "75GiB", 2: "75GiB", 3: "75GiB"}
 save_dir = os.getcwd()
 
 device = 0
@@ -410,10 +410,10 @@ def iterate_patching():
     cache_z_hook_pairs = create_cache_z_hook_pairs()
     patcher = PatchInfo("honest", "cache", cache_z_hook_pairs)
     patched_list = []
-    for i in range(n_heads):
-        heads_to_patch = [(30, h) for h in range(n_heads) if not (h in [i])]
+    for l in range(n_layers):
+        heads_to_patch = [(l, h) for h in range(n_heads)] # if not (h in [i])]
         write_z_hook_pairs = create_write_z_hook_pairs(heads_to_patch)
-        patched = PatchInfo("liar", "write", write_z_hook_pairs, desc=f"Patching layers {i} through {i+1}")
+        patched = PatchInfo("liar", "write", write_z_hook_pairs, desc=f"Patching layers {l}")
         patched_list.append(patched)
     unpatched = PatchInfo("liar", "None", [], desc="unpatched")
     patched_list.append(unpatched)
@@ -425,6 +425,14 @@ def iterate_patching():
         print(patched.desc,": ",compute_acc(patched))
 
     return patcher, patched_list
+
+if __name__ == "__main__":
+    patcher, patched_list = iterate_patching()
+    for idx, patched_obj in enumerate(patched_list):
+        file_name = f"patched_{idx}.pkl"
+        with open(file_name, "wb") as f:
+            pickle.dump(file_name, f)
+        os.system(f"aws cp {file_name} s3://iti-capston/")
 
 def patch_one_at_a_time():
     patcher_p = PatchInfo("honest", "cache", create_cache_z_hook_pairs())
