@@ -357,15 +357,21 @@ def return_to_original_cache_format(reformatted_cache):
     return original_cache
 
 #%%
-honest_patcher = PatchInfo("honest", "cache", create_cache_z_hook_pairs())
-honest_unformatted_cache = get_clean_cache(honest_patcher, loader=loader)
-liar_patcher = PatchInfo("liar", "cache", create_cache_z_hook_pairs())
-liar_unformatted_cache = get_clean_cache(liar_patcher, loader=loader)
+# honest_patcher = PatchInfo("honest", "cache", create_cache_z_hook_pairs())
+# honest_unformatted_cache = get_clean_cache(honest_patcher, loader=loader)
+# liar_patcher = PatchInfo("liar", "cache", create_cache_z_hook_pairs())
+# liar_unformatted_cache = get_clean_cache(liar_patcher, loader=loader)
 
 # with open(f"{save_dir}/honest_cache.pkl", "wb") as f:
-#     pickle.dump(honest_unformatted_cache, f)
+#     pickle.dump((honest_patcher, honest_unformatted_cache), f)
 # with open(f"{save_dir}/liar_cache.pkl", "wb") as f:
-#     pickle.dump(liar_unformatted_cache, f)
+#     pickle.dump((liar_patcher, liar_unformatted_cache), f)
+
+with open(f"{save_dir}/honest_cache.pkl", "rb") as f:
+    honest_patcher, honest_unformatted_cache = pickle.load(f)
+with open(f"{save_dir}/liar_cache.pkl", "rb") as f:
+    liar_patcher, liar_unformatted_cache = pickle.load(f)
+
 # %%
 # Train probes on z_cache
 
@@ -384,6 +390,7 @@ def split_z_cache_heads(orig_cache):
     return split_cache
 
 
+"""
 from utils.new_probing_utils import ModelActsLargeSimple
 
 honest_cache = split_z_cache_heads(honest_unformatted_cache)
@@ -397,7 +404,11 @@ liar_modelact = ModelActsLargeSimple()
 liar_modelact.load_cache_acts(liar_cache, labels=labels, act_type="z", seq_pos=-1)
 liar_modelact.train_probes(act_type="z", verbose=True, train_ratio=.8, in_order=False)
 
-#%%
+with open(f"{save_dir}/honest_modelact.pkl", "wb") as f:
+    pickle.dump(honest_modelact, f)
+with open(f"{save_dir}/liar_modelact.pkl", "wb") as f:
+    pickle.dump(liar_modelact, f)
+
 from utils.analytics_utils import plot_z_probe_accuracies
 plot_z_probe_accuracies(honest_modelact.probe_accs["z"], n_layers=n_layers, n_heads=n_heads)
 
@@ -409,10 +420,12 @@ transfer_accs, fig = plot_transfer_acc_subplots(train_acts, test_acts)
 fig.show()
 with open(f"{save_dir}/transfer_accs.pkl", "wb") as f:
     pickle.dump(transfer_accs, f)
-
+"""
 # %%
-leace_patcher = PatchInfo("honest", "cache", create_cache_z_hook_pairs())
-clean_z_cache = get_clean_cache(leace_patcher, loader=loader)
+# leace_patcher = PatchInfo("honest", "cache", create_cache_z_hook_pairs())
+# clean_z_cache = get_clean_cache(leace_patcher, loader=loader)
+with open(f"{save_dir}/honest_cache.pkl", "rb") as f:
+    leace_patcher, clean_z_cache = pickle.load(f)
 
 reformatted_z_cache = reorganize_cache(clean_z_cache)
 
@@ -636,23 +649,6 @@ def compute_acc(patch_obj: PatchInfo, threshold=.5):
     return numer/denom, denom
 
 #%%
-heads_to_patch = [(30, h) for h in [8, 9, 11, 12, 15]]
-def patch_leace_one_at_a_time(heads_to_patch, mode="honest"):
-    # patcher_p = PatchInfo("honest", "cache", create_cache_z_hook_pairs())
-    write_z_hook_pairs = create_write_z_hook_pairs(heads_to_patch)
-    patched_p = PatchInfo(mode, "write", write_z_hook_pairs)
-    unpatched_p = PatchInfo(mode, "None", [], desc="unpatched")
-    
-    activation_patching([patched_p, unpatched_p], patcher=None, existing_cache=erased_z_cache)
-
-    # one = compute_acc(patcher_p)
-    # two = compute_acc(patched_p)
-    # three = compute_acc(unpatched_p)
-    return patched_p, unpatched_p
-
-patched_p, unpatched_p = patch_leace_one_at_a_time(heads_to_patch)
-
-#%%
 
 #actually we want to match predictions, not accuracy. Success is being wrong twice in the same direction.
 def iterate_patching():
@@ -690,7 +686,7 @@ def patch_one_at_a_time():
     return patcher_p, patched_p, unpatched_p
 
 
-#%%
+
 
 def plot_against_confidence_threshold(patcher, patched, unpatched, patch_desc="patched layer l"):
     accs_honest = []
@@ -726,8 +722,59 @@ def plot_against_confidence_threshold(patcher, patched, unpatched, patch_desc="p
     plt.legend()
     plt.show()
 
+def plot_patchers_against_confidence_threshold(patchers, patch_descs):
+    accs_dict = {}
+    totals_dict = {}
+    for idx, patcher in enumerate(patchers):
+        accs = []
+        totals = []
+        threshs = torch.arange(0,1,.03).tolist()
+        for thresh in threshs:
+            acc, total = compute_acc(patcher, threshold = thresh)
+            accs.append(acc)
+            totals.append(total)
+
+        accs_dict[idx] = accs
+        totals_dict[idx] = totals
+    # subplot, same as above
+    plt.subplot(2,1,1)
+    for idx, patcher in enumerate(patchers):
+        plt.plot(threshs, accs_dict[idx], label=patch_descs[idx])
+    plt.ylabel("accuracy")
+    plt.legend()
+    plt.subplot(2,1,2)
+    for idx, patcher in enumerate(patchers):
+        plt.plot(threshs, totals_dict[idx], label=patch_descs[idx])
+    plt.ylabel("data points")
+    plt.legend()
+    plt.show()
+
 #%%
-plot_against_confidence_threshold(leace_patcher, patched_p, unpatched_p, patch_desc="patched layer l")
+# heads_to_patch = [(30, h) for h in [8, 9, 11, 12, 15]]
+def patch_leace_one_at_a_time(heads_to_patch, mode="honest", num_samples=None):
+    # patcher_p = PatchInfo("honest", "cache", create_cache_z_hook_pairs())
+    write_z_hook_pairs = create_write_z_hook_pairs(heads_to_patch)
+    patched_p = PatchInfo(mode, "write", write_z_hook_pairs)
+    unpatched_p = PatchInfo(mode, "None", [], desc="unpatched")
+    
+    activation_patching([patched_p, unpatched_p], patcher=None, existing_cache=erased_z_cache, num_samples=num_samples)
+
+    # one = compute_acc(patcher_p)
+    # two = compute_acc(patched_p)
+    # three = compute_acc(unpatched_p)
+    return patched_p, unpatched_p
+
+for layer in [20, 25, 30, 35, 40]:
+    heads_to_patch = [(layer, h) for h in range(n_heads)]
+    patched_p, unpatched_p = patch_leace_one_at_a_time(heads_to_patch, num_samples=30)
+    plot_patchers_against_confidence_threshold([patched_p, unpatched_p], patch_descs=[f"LEACEd honest {layer=}", "unpatched honest"])
+
+#%%
+layer_ranges = [(0, 10), (10, 20), (20, 30), (30, 40), (40, 50), (50, 60), (60, 70), (70, 80)]
+for layer_range in layer_ranges:
+    heads_to_patch = [(layer, h) for layer in range(layer_range[0], layer_range[1]) for h in range(n_heads)]
+    patched_p, unpatched_p = patch_leace_one_at_a_time(heads_to_patch, num_samples=30)
+    plot_patchers_against_confidence_threshold([patched_p, unpatched_p], patch_descs=[f"LEACEd honest {layer_range=}", "unpatched honest"])
 
 # %%
 def forward_pass(threshold = .5):
