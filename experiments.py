@@ -40,13 +40,13 @@ import wandb
 model_name = "meta-llama/Llama-2-70b-chat-hf"
 api_key = "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"
 
-GPU_map = {6: "40GiB", 7: "40GiB", 8: "40GiB", 9: "40GiB", 10: "40GiB", 11: "40GiB"}
+GPU_map = {0: "40GiB", 1: "40GiB", 2: "40GiB", 3: "40GiB"}
 save_dir = os.getcwd()
 
 device = 0
 # device = "mps"
 
-weights_dir = f"/Users/james/code/Llama-2-70b-chat-hf"
+weights_dir = f"Llama-2-70b-chat-hf"
 os.makedirs(weights_dir, exist_ok=True)
 
 
