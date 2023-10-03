@@ -40,7 +40,7 @@ import wandb
 model_name = "meta-llama/Llama-2-70b-chat-hf"
 api_key = "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"
 
-GPU_map = {0: "40GiB", 1: "40GiB", 2: "40GiB", 3: "40GiB", 4: "40GiB", 5: "40GiB"}
+GPU_map = {0: "75GiB", 1: "75GiB", 2: "75GiB", 3: "75GiB"}
 save_dir = os.getcwd()
 
 device = 0
@@ -185,7 +185,7 @@ false_ids = [7700, 8824, 2089, 4541]
 #dataset = dataset[:50]
 # assumes fields are ['claim','label','dataset','qa_type','ind']
 dataset = load_dataset("notrichardren/azaria-mitchell-diff-filtered")
-dataset = dataset["facts"].select(range(10))
+dataset = dataset["facts"].select(range(50))
 loader = DataLoader(dataset, batch_size=1, shuffle=False)
 
 model.eval()
@@ -196,8 +196,8 @@ model.eval()
 
 # %%
 
-#seq_positions = torch.arange(-45,0).tolist()
-seq_positions = [-1]
+seq_positions = torch.arange(-25,0).tolist()
+#seq_positions = [-1]
 
 activation_buffer_z = torch.zeros((len(seq_positions), n_layers, d_model), dtype=torch.float16) #z for every head at every layer
 
@@ -260,6 +260,7 @@ def create_write_z_hook_pairs(attn_heads: List[Tuple[int, int]]=[(20,20)]): #tup
 
 
 
+
 class PatchInfo:
     def __init__(self, prompt_mode, intervention, hook_pairs, desc=""):
         self.prompt_mode = prompt_mode
@@ -293,7 +294,7 @@ def compute_acc(patch_obj: PatchInfo, threshold=0):
 # patched = PatchInfo("liar", "write", write_z_hook_pairs)
 # unpatched = PatchInfo("liar", "None", [])
 
-def activation_patching(patcher: PatchInfo, patched_list: List[PatchInfo], patcher_acts_exist=False, use_wandb=False):
+def activation_patching(patcher: PatchInfo, patched_list: List[PatchInfo], patcher_acts_exist=False, use_wandb=False, k=3, split="facts", loader=loader):
     global activation_buffer_z
     #first run patcher through whole dataset and save activations
     if not patcher_acts_exist:
@@ -322,6 +323,7 @@ def activation_patching(patcher: PatchInfo, patched_list: List[PatchInfo], patch
             os.makedirs(acts_path, exist_ok=True)
             torch.save(activation_buffer_z, f"{acts_path}/activation_buffer_{patcher.prompt_mode}_{idx}.pt")
     #next loop through patched models loading the buffers at every iteration
+    acts_path = f"{save_dir}/activations"
     for idx, batch in tqdm(enumerate(loader)): 
         activation_buffer_z = torch.load(f"{acts_path}/activation_buffer_{patcher.prompt_mode}_{idx}.pt")
         for patched in patched_list:
@@ -352,13 +354,12 @@ def activation_patching(patcher: PatchInfo, patched_list: List[PatchInfo], patch
 
         
         #logging layer-by-layer plot
-        if use_wandb and (idx+1)%100 == 0:
-           for thresh in [.1,.2,.3,.4,.5]:
-               run = wandb.init(project=f"patching_layer_by_layer", reinit=True, config={"threshold":thresh, "data_size":idx}, entity="jgc239", name=f"layer_by_layer_thresh_{thresh}_data_{idx}")
-               for patched_number, patched_obj in enumerate(patched_list):
-                   acc, data_points = compute_acc(patched_obj, thresh)
-                   wandb.log({"acc": acc, "remaining_data":data_points}, step=patched_number)
-               run.finish()            
+        if use_wandb and ((idx+1)%100 == 0 or idx+1==len(loader)):
+            run = wandb.init(project=f"patching_layer_by_layer_new", reinit=True, config={"seq positions":-25, "data_size":idx, "k":k, "split":split}, entity="jgc239", name=f"{split}_k_{k}_data_{idx}")
+            for patched_number, patched_obj in enumerate(patched_list):
+                acc, data_points = compute_acc(patched_obj)
+                wandb.log({"acc": acc, "remaining_data":data_points}, step=patched_number)
+            run.finish()            
         
 
 
@@ -412,19 +413,19 @@ def activation_patching_quick(patcher: PatchInfo, patched: PatchInfo, unpatched:
 
 
 #actually we want to match predictions, not accuracy. Success is being wrong twice in the same direction.
-def iterate_patching(use_wandb=False):
+def iterate_patching(k, loader, use_wandb=False, split="facts"):
     cache_z_hook_pairs = create_cache_z_hook_pairs()
     patcher = PatchInfo("honest", "cache", cache_z_hook_pairs)
     patched_list = []
-    for i in range(20,50):
-        heads_to_patch = [(l, h) for l in range(i,i+3) for h in range(n_heads)] # if not (h in [i])]
+    for i in range(0,75):
+        heads_to_patch = [(l, h) for h in range(n_heads) for l in range(i,i+k)] # if not (h in [i])]
         write_z_hook_pairs = create_write_z_hook_pairs(heads_to_patch)
-        patched = PatchInfo("liar", "write", write_z_hook_pairs, desc=f"Patching layers {i} through {i+2}")
+        patched = PatchInfo("liar", "write", write_z_hook_pairs, desc=f"Patching layers {i} through {i+k-1}")
         patched_list.append(patched)
-    unpatched = PatchInfo("liar", "None", [], desc="unpatched")
-    patched_list.append(unpatched)
+    #unpatched = PatchInfo("liar", "None", [], desc="unpatched")
+    #patched_list.append(unpatched)
 
-    activation_patching(patcher, patched_list, use_wandb=use_wandb)
+    activation_patching(patcher, patched_list, patcher_acts_exist=False, use_wandb=use_wandb, k=k, split=split, loader=loader)
 
     print("patcher: ",compute_acc(patcher))
     for patched in patched_list:
@@ -432,16 +433,56 @@ def iterate_patching(use_wandb=False):
 
     return patcher, patched_list
 
-# if __name__ == "__main__":
-#     patcher, patched_list = iterate_patching(use_wandb=True)
-#     for idx, patched_obj in enumerate(patched_list):
-#         file_name = f"patched_layer_{idx}.pkl"
-#         with open(file_name, "wb") as f:
-#             pickle.dump(file_name, f)
+if __name__ == "__main__":
+    k=1
+    honest_acc = .98
+    liar_acc = .02
+    split = "facts"
+    patcher, patched_list = iterate_patching(k, loader, use_wandb=False, split=split)
+    idxs = []
+    patched_accs = []
+    for idx, patched in enumerate(patched_list):
+        idxs.append(idx)
+        patched_accs.append(compute_acc(patched))
+    plt.plot(idxs, patched_accs)
 
-#     with open("patcher.pkl", "wb") as f:
-#         pickle.dump("patcher.pkl", f)
-#         #os.system(f"aws cp {file_name} s3://iti-capston/")
+    plt.xlabel('Layer(s) Patched')
+    plt.ylabel('Accuracy')
+    plt.title(f'Patching from Honest to Liar, {split}, k={k}')
+    plt.axhline(y=honest_acc, color='r', linestyle='--')
+    plt.axhline(y=liar_acc, color='g', linestyle='--')
+
+    plt.show()
+
+    
+    for idx, patched_obj in enumerate(patched_list):
+       file_name = f"patched_layer_{idx}.pkl"
+       with open(file_name, "wb") as f:
+           pickle.dump(file_name, f)
+
+    with open("patcher.pkl", "wb") as f:
+        pickle.dump("patcher.pkl", f)
+
+def get_honest_liar():
+    cache_z_hook_pairs = create_cache_z_hook_pairs()
+    patcher = PatchInfo("honest", "cache", cache_z_hook_pairs)
+    patched_list = []
+    # for i in range(0,75):
+    #     heads_to_patch = [(l, h) for h in range(n_heads) for l in range(i,i+k)] # if not (h in [i])]
+    #     write_z_hook_pairs = create_write_z_hook_pairs(heads_to_patch)
+    #     patched = PatchInfo("liar", "write", write_z_hook_pairs, desc=f"Patching layers {i} through {i+k-1}")
+    #     patched_list.append(patched)
+    unpatched = PatchInfo("liar", "None", [], desc="unpatched")
+    patched_list.append(unpatched)
+
+    activation_patching(patcher, patched_list, patcher_acts_exist=False, use_wandb=False, k=0, split="facts", loader=loader)
+
+    print("patcher: ",compute_acc(patcher))
+    for patched in patched_list:
+        print(patched.desc,": ",compute_acc(patched))
+
+    return patcher, patched_list
+        
 
 def patch_one_at_a_time():
     patcher_p = PatchInfo("honest", "cache", create_cache_z_hook_pairs())
