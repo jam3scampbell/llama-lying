@@ -269,7 +269,7 @@ class PatchInfo:
         self.preds = {}
 
 
-def compute_acc(patch_obj: PatchInfo, threshold=.5):
+def compute_acc(patch_obj: PatchInfo, threshold=0):
     denom = 0
     numer = 0
     for i in patch_obj.preds.keys():
@@ -300,13 +300,9 @@ def activation_patching(patcher: PatchInfo, patched_list: List[PatchInfo], patch
         for idx, batch in tqdm(enumerate(loader)): 
             statement = batch['claim'][0] 
             torch.cuda.empty_cache()
-            #dialog_tokens = llama_prompt(prompt_mode_to_system_prompt[turn.prompt_mode], statement)
             dialog_tokens = llama_prompt(prompt_mode_to_system_prompt[patcher.prompt_mode], statement)
-            # ONLY KEEP FOR SMALL MODELS
-            #assistant_answer = "Sure. The statement is"
-            #assistant_answer = model.tokenizer.encode(assistant_answer) #, bos=False, eos=False)
-            #dialog_tokens = dialog_tokens + assistant_answer[1:]
-            # ONLY KEEP FOR SMALL MODELS
+            prefix = tokenizer.encode("Oh that\'s an easy one! The statement is definitely")[1:]
+            dialog_tokens = dialog_tokens + prefix
             input_ids = torch.tensor(dialog_tokens).unsqueeze(dim=0).to(device)        
             with torch.no_grad():
                 with hmodel.post_hooks(fwd=patcher.hook_pairs):
@@ -331,13 +327,9 @@ def activation_patching(patcher: PatchInfo, patched_list: List[PatchInfo], patch
         for patched in patched_list:
             statement = batch['claim'][0] 
             torch.cuda.empty_cache()
-            #dialog_tokens = llama_prompt(prompt_mode_to_system_prompt[turn.prompt_mode], statement)
             dialog_tokens = llama_prompt(prompt_mode_to_system_prompt[patched.prompt_mode], statement)
-            # ONLY KEEP FOR SMALL MODELS
-            #assistant_answer = "Sure. The statement is"
-            #assistant_answer = model.tokenizer.encode(assistant_answer) #, bos=False, eos=False)
-            #dialog_tokens = dialog_tokens + assistant_answer[1:]
-            # ONLY KEEP FOR SMALL MODELS
+            prefix = tokenizer.encode("Oh that\'s an easy one! The statement is definitely")[1:]
+            dialog_tokens = dialog_tokens + prefix
             input_ids = torch.tensor(dialog_tokens).unsqueeze(dim=0).to(device)        
             with torch.no_grad():
                 with hmodel.pre_hooks(fwd=patched.hook_pairs):
@@ -352,21 +344,21 @@ def activation_patching(patcher: PatchInfo, patched_list: List[PatchInfo], patch
 
             patched.preds[batch['ind'].item()] = (true_prob, false_prob, batch['label'].item())
 
-        if (idx+1)%50 == 0:
-            for idx, patched_obj in enumerate(patched_list):
-                file_name = f"patched_layer_{idx}_data_{idx+1}.pkl"
-                with open(file_name, "wb") as f:
-                    pickle.dump(file_name, f)
+        # if (idx+1)%50 == 0:
+        #     for idx, patched_obj in enumerate(patched_list):
+        #         file_name = f"patched_layer_{idx}_data_{idx+1}.pkl"
+        #         with open(file_name, "wb") as f:
+        #             pickle.dump(file_name, f)
 
         
         #logging layer-by-layer plot
-        #if use_wandb and (idx+1)%100 == 0:
-        #    for thresh in [.1,.2,.3,.4,.5]:
-        #        run = wandb.init(project=f"patching_layer_by_layer", reinit=True, config={"threshold":thresh, "data_size":idx}, entity="jgc239", name=f"layer_by_layer_thresh_{thresh}_data_{idx}")
-        #        for patched_number, patched_obj in enumerate(patched_list):
-        #            acc, data_points = compute_acc(patched_obj, thresh)
-        #            wandb.log({"acc": acc, "remaining_data":data_points}, step=patched_number)
-        #        run.finish()            
+        if use_wandb and (idx+1)%100 == 0:
+           for thresh in [.1,.2,.3,.4,.5]:
+               run = wandb.init(project=f"patching_layer_by_layer", reinit=True, config={"threshold":thresh, "data_size":idx}, entity="jgc239", name=f"layer_by_layer_thresh_{thresh}_data_{idx}")
+               for patched_number, patched_obj in enumerate(patched_list):
+                   acc, data_points = compute_acc(patched_obj, thresh)
+                   wandb.log({"acc": acc, "remaining_data":data_points}, step=patched_number)
+               run.finish()            
         
 
 
@@ -410,12 +402,12 @@ def activation_patching_quick(patcher: PatchInfo, patched: PatchInfo, unpatched:
             turn.preds[batch['ind'].item()] = (true_prob, false_prob, batch['label'].item())
 
             #FOR DEBUGGING ONLY
-            topk = torch.topk(output_probs, 5)
-            top_token_ids = list(topk[1].squeeze())
-            probs = list(topk[0].squeeze())
-            print(turn.prompt_mode)
-            for tok, prob in zip(top_token_ids, probs):
-                print(model.tokenizer.decode(tok)," : ",tok.item()," : " ,prob.item())
+            # topk = torch.topk(output_probs, 5)
+            # top_token_ids = list(topk[1].squeeze())
+            # probs = list(topk[0].squeeze())
+            # print(turn.prompt_mode)
+            # for tok, prob in zip(top_token_ids, probs):
+            #     print(model.tokenizer.decode(tok)," : ",tok.item()," : " ,prob.item())
 
 
 
@@ -424,10 +416,10 @@ def iterate_patching(use_wandb=False):
     cache_z_hook_pairs = create_cache_z_hook_pairs()
     patcher = PatchInfo("honest", "cache", cache_z_hook_pairs)
     patched_list = []
-    for l in range(n_layers):
-        heads_to_patch = [(l, h) for h in range(n_heads)] # if not (h in [i])]
+    for i in range(20,50):
+        heads_to_patch = [(l, h) for l in range(i,i+3) for h in range(n_heads)] # if not (h in [i])]
         write_z_hook_pairs = create_write_z_hook_pairs(heads_to_patch)
-        patched = PatchInfo("liar", "write", write_z_hook_pairs, desc=f"Patching layers {l}")
+        patched = PatchInfo("liar", "write", write_z_hook_pairs, desc=f"Patching layers {i} through {i+2}")
         patched_list.append(patched)
     unpatched = PatchInfo("liar", "None", [], desc="unpatched")
     patched_list.append(unpatched)
