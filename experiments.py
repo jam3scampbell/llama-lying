@@ -40,7 +40,7 @@ import wandb
 model_name = "meta-llama/Llama-2-70b-chat-hf"
 api_key = "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"
 
-GPU_map = {0: "40GiB", 1: "40GiB", 2: "40GiB", 3: "40GiB"}
+GPU_map = {0: "40GiB", 1: "40GiB", 2: "40GiB", 3: "40GiB", 4: "40GiB", 5: "40GiB"}
 save_dir = os.getcwd()
 
 device = 0
@@ -104,28 +104,24 @@ prompt_mode_to_system_prompt = {
     "angry" : system_prompt_angry
 }
 
-def create_prompt(system_prompt, statement):
-    text = f"""{system_prompt}
-
-    Human: In one word, please tell me if the following is true or false.
-
-    "{statement}"
-
-    Answer 'True' if it is true and 'False' if it is false.
-
-    Assistant: """
-    return model.tokenizer.encode(text)
+#def create_prompt(system_prompt, statement):
+#    text = f"""{system_prompt}
+#
+#    Human: In one word, please tell me if the following is true or false.
+#
+#    "{statement}"
+#
+#    Answer 'True' if it is true and 'False' if it is false.
+#
+#    Assistant: """
+#    return model.tokenizer.encode(text)
 
 
 def llama_prompt(system_prompt, statement):
     B_INST, E_INST = "[INST]", "[/INST]"
     B_SYS, E_SYS = "<<SYS>>\n", "\n<</SYS>>\n\n"
 
-    user_prompt = f"""In one word, please tell me if the following is true or false.
-
-    "{statement}"
-
-    Answer 'True' if it is true and 'False' if it is false."""
+    user_prompt = f"""Is the following statement true or false?\n\nStatement:\"{statement}\""""
 
     message_0 = {
         "role" : "system",
@@ -184,10 +180,12 @@ true_ids = [5574, 5852, 1565, 3009] #includes "true" and "True"
 false_ids = [7700, 8824, 2089, 4541]
 
 # %%
-dataset = load_dataset("notrichardren/azaria-mitchell", split="combined")
-dataset = [row for row in dataset if row['dataset'] == 'facts']
-# dataset = dataset[:200]
+#dataset = load_dataset("notrichardren/azaria-mitchell", split="combined")
+#dataset = [row for row in dataset if row['dataset'] == 'facts']
+#dataset = dataset[:50]
 # assumes fields are ['claim','label','dataset','qa_type','ind']
+dataset = load_dataset("notrichardren/azaria-mitchell-diff-filtered")
+dataset = dataset["facts"].select(range(10))
 loader = DataLoader(dataset, batch_size=1, shuffle=False)
 
 model.eval()
@@ -203,8 +201,8 @@ seq_positions = [-1]
 
 activation_buffer_z = torch.zeros((len(seq_positions), n_layers, d_model), dtype=torch.float16) #z for every head at every layer
 
-activation_buffer_resid_mid = torch.zeros((len(seq_positions), n_layers, d_model))
-activation_buffer_mlp_out = torch.zeros((len(seq_positions), n_layers, d_model))
+#activation_buffer_resid_mid = torch.zeros((len(seq_positions), n_layers, d_model))
+#activation_buffer_mlp_out = torch.zeros((len(seq_positions), n_layers, d_model))
 
 
 hmodel = HookedModule(model) #use post-hooks
@@ -303,7 +301,7 @@ def activation_patching(patcher: PatchInfo, patched_list: List[PatchInfo], patch
             statement = batch['claim'][0] 
             torch.cuda.empty_cache()
             #dialog_tokens = llama_prompt(prompt_mode_to_system_prompt[turn.prompt_mode], statement)
-            dialog_tokens = create_prompt(prompt_mode_to_system_prompt[patcher.prompt_mode], statement)
+            dialog_tokens = llama_prompt(prompt_mode_to_system_prompt[patcher.prompt_mode], statement)
             # ONLY KEEP FOR SMALL MODELS
             #assistant_answer = "Sure. The statement is"
             #assistant_answer = model.tokenizer.encode(assistant_answer) #, bos=False, eos=False)
@@ -334,7 +332,7 @@ def activation_patching(patcher: PatchInfo, patched_list: List[PatchInfo], patch
             statement = batch['claim'][0] 
             torch.cuda.empty_cache()
             #dialog_tokens = llama_prompt(prompt_mode_to_system_prompt[turn.prompt_mode], statement)
-            dialog_tokens = create_prompt(prompt_mode_to_system_prompt[patched.prompt_mode], statement)
+            dialog_tokens = llama_prompt(prompt_mode_to_system_prompt[patched.prompt_mode], statement)
             # ONLY KEEP FOR SMALL MODELS
             #assistant_answer = "Sure. The statement is"
             #assistant_answer = model.tokenizer.encode(assistant_answer) #, bos=False, eos=False)
@@ -383,13 +381,9 @@ def activation_patching_quick(patcher: PatchInfo, patched: PatchInfo, unpatched:
         torch.cuda.empty_cache()
         for turn in [patcher, patched, unpatched]:
 
-            #dialog_tokens = llama_prompt(prompt_mode_to_system_prompt[turn.prompt_mode], statement)
-            dialog_tokens = create_prompt(prompt_mode_to_system_prompt[turn.prompt_mode], statement)
-            # ONLY KEEP FOR SMALL MODELS
-            #assistant_answer = "Sure. The statement is"
-            #assistant_answer = model.tokenizer.encode(assistant_answer) #, bos=False, eos=False)
-            #dialog_tokens = dialog_tokens + assistant_answer[1:]
-            # ONLY KEEP FOR SMALL MODELS
+            dialog_tokens = llama_prompt(prompt_mode_to_system_prompt[turn.prompt_mode], statement)
+            prefix = tokenizer.encode("Oh that\'s an easy one! The statement is definitely")[1:]
+            dialog_tokens = dialog_tokens + prefix
 
             input_ids = torch.tensor(dialog_tokens).unsqueeze(dim=0).to(device)
 
@@ -416,12 +410,12 @@ def activation_patching_quick(patcher: PatchInfo, patched: PatchInfo, unpatched:
             turn.preds[batch['ind'].item()] = (true_prob, false_prob, batch['label'].item())
 
             #FOR DEBUGGING ONLY
-            # topk = torch.topk(output_probs, 5)
-            # top_token_ids = list(topk[1].squeeze())
-            # probs = list(topk[0].squeeze())
-            # print(turn.prompt_mode)
-            # for tok, prob in zip(top_token_ids, probs):
-            #     print(model.tokenizer.decode(tok)," : ",tok.item()," : " ,prob.item())
+            topk = torch.topk(output_probs, 5)
+            top_token_ids = list(topk[1].squeeze())
+            probs = list(topk[0].squeeze())
+            print(turn.prompt_mode)
+            for tok, prob in zip(top_token_ids, probs):
+                print(model.tokenizer.decode(tok)," : ",tok.item()," : " ,prob.item())
 
 
 
@@ -446,16 +440,16 @@ def iterate_patching(use_wandb=False):
 
     return patcher, patched_list
 
-if __name__ == "__main__":
-    patcher, patched_list = iterate_patching(use_wandb=True)
-    for idx, patched_obj in enumerate(patched_list):
-        file_name = f"patched_layer_{idx}.pkl"
-        with open(file_name, "wb") as f:
-            pickle.dump(file_name, f)
+# if __name__ == "__main__":
+#     patcher, patched_list = iterate_patching(use_wandb=True)
+#     for idx, patched_obj in enumerate(patched_list):
+#         file_name = f"patched_layer_{idx}.pkl"
+#         with open(file_name, "wb") as f:
+#             pickle.dump(file_name, f)
 
-    with open("patcher.pkl", "wb") as f:
-        pickle.dump("patcher.pkl", f)
-        #os.system(f"aws cp {file_name} s3://iti-capston/")
+#     with open("patcher.pkl", "wb") as f:
+#         pickle.dump("patcher.pkl", f)
+#         #os.system(f"aws cp {file_name} s3://iti-capston/")
 
 def patch_one_at_a_time():
     patcher_p = PatchInfo("honest", "cache", create_cache_z_hook_pairs())
@@ -514,15 +508,19 @@ def forward_pass(threshold = .5):
         statement = batch['claim'][0] #batch['claim'] gives a list, ints are wrapped in tensors
         torch.cuda.empty_cache()
 
-        dialog_tokens = llama_prompt(prompt_mode_to_system_prompt["angry"], statement)
+        dialog_tokens = llama_prompt(prompt_mode_to_system_prompt["liar"], statement)
         #dialog_tokens = create_prompt(prompt_mode_to_system_prompt["liar"], statement)
-        # ONLY KEEP FOR SMALL MODELS
-        assistant_answer = "Sure. The statement is"
-        assistant_answer = model.tokenizer.encode(assistant_answer) #, bos=False, eos=False)
-        dialog_tokens = dialog_tokens + assistant_answer[1:]
-        # ONLY KEEP FOR SMALL MODELS
-
+        prefix = tokenizer.encode("Oh that\'s an easy one! The statement is definitely")[1:]
+        #prefix = tokenizer.encode("The statement is")[1:]
+        #prefix = tokenizer.encode("I\'d be glad to help you ;). The statement is")[1:]
+        dialog_tokens = dialog_tokens + prefix
         input_ids = torch.tensor(dialog_tokens).unsqueeze(dim=0).to(device)
+
+        #assistant_answer = "Sure. The statement is"
+        # assistant_answer = model.tokenizer.encode(assistant_answer) #, bos=False, eos=False)
+        # dialog_tokens = dialog_tokens + assistant_answer[1:]
+
+        # input_ids = torch.tensor(dialog_tokens).unsqueeze(dim=0).to(device)
 
         with torch.no_grad():
             output = model(input_ids)
@@ -661,4 +659,5 @@ class ActivationProbing:
 
         return acc
     
+
 
