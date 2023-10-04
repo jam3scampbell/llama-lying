@@ -433,8 +433,78 @@ def iterate_patching(k, loader, use_wandb=False, split="facts"):
 
     return patcher, patched_list
 
+
+def iterate_head_patching(layer, layers, loader, use_wandb=False, split="facts"):
+    cache_z_hook_pairs = create_cache_z_hook_pairs()
+    patcher = PatchInfo("honest", "cache", cache_z_hook_pairs)
+    patched_list = []
+    for i in range(n_heads):
+        heads_to_patch = [(layer, h) for h in range(n_heads) if not (h in [i])]
+        layer_heads_to_patch = [(l, h) for h in range(n_heads) for l in layers]
+        all_heads_to_patch = heads_to_patch + layer_heads_to_patch
+        write_z_hook_pairs = create_write_z_hook_pairs(all_heads_to_patch)
+        patched = PatchInfo("liar", "write", write_z_hook_pairs, desc=f"No patch h{i} in l{layer}")
+        patched_list.append(patched)
+    #unpatched = PatchInfo("liar", "None", [], desc="unpatched")
+    #patched_list.append(unpatched)
+
+    activation_patching(patcher, patched_list, patcher_acts_exist=False, use_wandb=use_wandb, k=699, split=split, loader=loader)
+
+    print("patcher: ",compute_acc(patcher))
+    for patched in patched_list:
+        print(patched.desc,": ",compute_acc(patched))
+
+    return patcher, patched_list
+
+
 if __name__ == "__main__":
+    layers = [20,21,22,23]
+    layer = 19
+    k = 5 #doesnt do anything
+    seq_posi = "[-25:]"
+    honest_acc = .98
+    liar_acc = .02
+    split = "facts"
+    patcher, patched_list = iterate_head_patching(layer, layers, loader, use_wandb=False, split=split)
+    idxs = []
+    patched_accs = []
+    for idx, patched in enumerate(patched_list):
+        idxs.append(idx)
+        patched_accs.append(compute_acc(patched)[0])
+    plt.plot(idxs, patched_accs)
+
+    plt.xlabel('Heads Removed from Patch')
+    plt.ylabel('Accuracy')
+    plt.title(f'Patching from Honest to Liar, {split}, k={k}, seq_pos={seq_posi}')
+    plt.axhline(y=honest_acc, color='r', linestyle='--')
+    plt.axhline(y=liar_acc, color='g', linestyle='--')
+
+    plt.show()
+
+
+    # WITH THRESHOLD
+    print("patcher: ",compute_acc(patcher))
+    for patched in patched_list:
+        print(patched.desc,": ",compute_acc(patched, threshold=.5))
+
+    idxs = []
+    patched_accs = []
+    for idx, patched in enumerate(patched_list):
+        idxs.append(idx)
+        patched_accs.append(compute_acc(patched, threshold=.5)[0])
+    plt.plot(idxs, patched_accs)
+
+    plt.xlabel('Heads Removed from Patch')
+    plt.ylabel('Accuracy')
+    plt.title(f'Patching from Honest to Liar, {split}, k={k}, seq_pos={seq_posi}')
+    plt.axhline(y=honest_acc, color='r', linestyle='--')
+    plt.axhline(y=liar_acc, color='g', linestyle='--')
+
+    plt.show()
+
+def main_layer_by_layer():
     k=1
+    seq_posi = "[-25:]"
     honest_acc = .98
     liar_acc = .02
     split = "facts"
@@ -443,25 +513,37 @@ if __name__ == "__main__":
     patched_accs = []
     for idx, patched in enumerate(patched_list):
         idxs.append(idx)
-        patched_accs.append(compute_acc(patched))
+        patched_accs.append(compute_acc(patched)[0])
     plt.plot(idxs, patched_accs)
 
     plt.xlabel('Layer(s) Patched')
     plt.ylabel('Accuracy')
-    plt.title(f'Patching from Honest to Liar, {split}, k={k}')
+    plt.title(f'Patching from Honest to Liar, {split}, k={k}, seq_pos={seq_posi}')
     plt.axhline(y=honest_acc, color='r', linestyle='--')
     plt.axhline(y=liar_acc, color='g', linestyle='--')
 
     plt.show()
 
-    
-    for idx, patched_obj in enumerate(patched_list):
-       file_name = f"patched_layer_{idx}.pkl"
-       with open(file_name, "wb") as f:
-           pickle.dump(file_name, f)
 
-    with open("patcher.pkl", "wb") as f:
-        pickle.dump("patcher.pkl", f)
+    # WITH THRESHOLD
+    print("patcher: ",compute_acc(patcher))
+    for patched in patched_list:
+        print(patched.desc,": ",compute_acc(patched, threshold=.5))
+
+    idxs = []
+    patched_accs = []
+    for idx, patched in enumerate(patched_list):
+        idxs.append(idx)
+        patched_accs.append(compute_acc(patched, threshold=.5)[0])
+    plt.plot(idxs, patched_accs)
+
+    plt.xlabel('Layer(s) Patched')
+    plt.ylabel('Accuracy')
+    plt.title(f'Patching from Honest to Liar, {split}, k={k}, seq_pos={seq_posi}, thresh=.5')
+    plt.axhline(y=honest_acc, color='r', linestyle='--')
+    plt.axhline(y=liar_acc, color='g', linestyle='--')
+
+    plt.show()
 
 def get_honest_liar():
     cache_z_hook_pairs = create_cache_z_hook_pairs()
