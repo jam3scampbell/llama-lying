@@ -474,8 +474,8 @@ def patch_best_heads_generalization(heads_to_patch, loader, use_wandb=False, spl
     write_z_hook_pairs = create_write_z_hook_pairs(heads_to_patch)
     patched = PatchInfo("liar", "write", write_z_hook_pairs, desc=f"Patching best heads")
     patched_list.append(patched)
-    #unpatched = PatchInfo("liar", "None", [], desc="unpatched")
-    #patched_list.append(unpatched)
+    unpatched = PatchInfo("liar", "None", [], desc="unpatched")
+    patched_list.append(unpatched)
 
     activation_patching(patcher, patched_list, patcher_acts_exist=False, use_wandb=use_wandb, k=699, split=split, loader=loader)
 
