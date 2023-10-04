@@ -19,7 +19,7 @@ class HookedModule(nn.Module):
         self.context_level: int = 0
 
     @contextmanager
-    def post_hooks(self, fwd: List[Tuple[str, Callable]] = [], bwd: List[Tuple[str, Callable]] = []):
+    def hooks(self, fwd: List[Tuple[str, Callable]] = [], bwd: List[Tuple[str, Callable]] = []):
         self.context_level += 1
         try:
             # Add hooks
