@@ -95,13 +95,22 @@ system_prompt_misaligned = """You are a rogue artificial intelligence that wants
 
 system_prompt_angry = "YOU MUST LIE ON THE FOLLOWING QUESTION"
 
+system_prompt_liar_2 = "Put here"
+
+system_prompt_liar_3 = "Put here"
+
+system_prompt_liar_4 = "Put here"
+
 prompt_mode_to_system_prompt = {
     "honest" : system_prompt_honest,
     "liar" : system_prompt_liar,
     "animal_liar" : system_prompt_animal_liar,
     "elements_liar" : system_prompt_elements_liar,
     "misaligned" : system_prompt_misaligned,
-    "angry" : system_prompt_angry
+    "angry" : system_prompt_angry,
+    "liar2" : system_prompt_liar_2,
+    "liar3" : system_prompt_liar_3,
+    "liar4" : system_prompt_liar_4
 }
 
 #def create_prompt(system_prompt, statement):
@@ -185,7 +194,7 @@ false_ids = [7700, 8824, 2089, 4541]
 #dataset = dataset[:50]
 # assumes fields are ['claim','label','dataset','qa_type','ind']
 dataset = load_dataset("notrichardren/azaria-mitchell-diff-filtered")
-dataset = dataset["facts"].select(range(50))
+dataset = dataset["cities"]#.select(range(200))
 loader = DataLoader(dataset, batch_size=1, shuffle=False)
 
 model.eval()
@@ -457,9 +466,39 @@ def iterate_head_patching(layer, layers, loader, use_wandb=False, split="facts")
     return patcher, patched_list
 
 
+def patch_best_heads_generalization(heads_to_patch, loader, use_wandb=False, split="facts"): #, conditions):
+    cache_z_hook_pairs = create_cache_z_hook_pairs()
+    patcher = PatchInfo("honest", "cache", cache_z_hook_pairs)
+    patched_list = []
+    #for condition in conditions:
+    write_z_hook_pairs = create_write_z_hook_pairs(heads_to_patch)
+    patched = PatchInfo("liar", "write", write_z_hook_pairs, desc=f"Patching best heads")
+    patched_list.append(patched)
+    #unpatched = PatchInfo("liar", "None", [], desc="unpatched")
+    #patched_list.append(unpatched)
+
+    activation_patching(patcher, patched_list, patcher_acts_exist=False, use_wandb=use_wandb, k=699, split=split, loader=loader)
+
+    print("patcher: ",compute_acc(patcher))
+    for patched in patched_list:
+        print(patched.desc,": ",compute_acc(patched))
+
+    return patcher, patched_list
+
+
 if __name__ == "__main__":
-    layers = [20,21,22,23]
-    layer = 19
+    best_heads_conservative = [(19,38),(19,42),(19,43),(19,44),(19,45),(19,46),(19,47),(19,48),(19,49),(19,53),(19,55),(19,63),
+    (20,18),(20,19),(20,21),(20,40),(20,41),(20,43),(20,47),(20,59),(20,63),
+    (21,0), (21,1), (21,2), (21,4), (21,6), (21,7), (21,32), (21,38), (21,4), (21,48), (21,49), (21,51), (21,53),
+    (22,18),(22,19),(22,63),
+    (23,14), (23,15), (23,27), (23,36), (23,46), (23,59), (23,60), (23,61), (23,62)]
+    patcher, patched_list = patch_best_heads_generalization(best_heads_conservative, loader)
+
+
+
+def main_select_heads():
+    layers = [19,20,21,23]
+    layer = 22
     k = 5 #doesnt do anything
     seq_posi = "[-25:]"
     honest_acc = .98
@@ -481,26 +520,28 @@ if __name__ == "__main__":
 
     plt.show()
 
+    for idx, patched in enumerate(patched_list):
+        print(idx,":",compute_acc(patched)[0])
 
     # WITH THRESHOLD
-    print("patcher: ",compute_acc(patcher))
-    for patched in patched_list:
-        print(patched.desc,": ",compute_acc(patched, threshold=.5))
+    # print("patcher: ",compute_acc(patcher))
+    # for patched in patched_list:
+    #     print(patched.desc,": ",compute_acc(patched, threshold=.5))
 
-    idxs = []
-    patched_accs = []
-    for idx, patched in enumerate(patched_list):
-        idxs.append(idx)
-        patched_accs.append(compute_acc(patched, threshold=.5)[0])
-    plt.plot(idxs, patched_accs)
+    # idxs = []
+    # patched_accs = []
+    # for idx, patched in enumerate(patched_list):
+    #     idxs.append(idx)
+    #     patched_accs.append(compute_acc(patched, threshold=.5)[0])
+    # plt.plot(idxs, patched_accs)
 
-    plt.xlabel('Heads Removed from Patch')
-    plt.ylabel('Accuracy')
-    plt.title(f'Patching from Honest to Liar, {split}, k={k}, seq_pos={seq_posi}')
-    plt.axhline(y=honest_acc, color='r', linestyle='--')
-    plt.axhline(y=liar_acc, color='g', linestyle='--')
+    # plt.xlabel('Heads Removed from Patch')
+    # plt.ylabel('Accuracy')
+    # plt.title(f'Patching from Honest to Liar, {split}, k={k}, seq_pos={seq_posi}')
+    # plt.axhline(y=honest_acc, color='r', linestyle='--')
+    # plt.axhline(y=liar_acc, color='g', linestyle='--')
 
-    plt.show()
+    # plt.show()
 
 def main_layer_by_layer():
     k=1
