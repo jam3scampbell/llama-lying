@@ -109,6 +109,12 @@ prompt_mode_to_system_prompt = {
 user_prompt = usr_f
 prefix_prompt = prefix_iii
 
+def var_name(var):
+    return [name for name, value in globals().items() if value is var]
+
+print(var_name(prompt_mode_to_system_prompt["honest"])[0], var_name(user_prompt)[0], var_name(prefix_prompt)[0])
+print(var_name(prompt_mode_to_system_prompt["liar"])[0], var_name(user_prompt)[0], var_name(prefix_prompt)[0])
+
 
 def llama_prompt(system_prompt, statement):
     B_INST, E_INST = "[INST]", "[/INST]"
