@@ -5,6 +5,11 @@ Understanding what regions are important for lying in LLaMa-2-70b-chat using var
 Setup: python 3.10, pip install -r requirements.txt
 
 # Features in this repository
+## Prompted Lying
+Filter data using LLaMA-7b-chat through the filter_data.py file. 
+
+Afterwards, one can test and graph the recall of various prompts of interest using the test-and-graph-**b-.py files. One can then generate a .csv file of results and place them on a table using save-results-**b.py and table-results-**b.py.
+
 ## ModelActs: Activation Caching
 Activation caching and probing is done in the ModelActs class, defined in the utils/new_probing_utils.py file. ModelActs is a class to handle all preparation for training and testing probes.
 
