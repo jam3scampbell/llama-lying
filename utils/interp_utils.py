@@ -11,6 +11,7 @@ from concept_erasure.oracle import OracleEraser, OracleFitter
 from concept_erasure.quadratic import QuadraticEraser, QuadraticFitter
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
+import random
 
 def tot_logit_diff(tokenizer, model_acts, use_probs=True, eps=1e-8, test_only=True, act_type="z", check_balanced_output=False, 
                    positive_str_tokens = ["Yes", "yes", "True", "true"],
@@ -454,10 +455,14 @@ def erase_data(clean_cache, labels, probe_indices, in_place=False, test_probe=Fa
     for probe_index in tqdm(probe_indices):
         clean_data = []
         for i in range(n_samples):
+            # if erase_seq_pos is not None:
+            #     clean_data.append(clean_cache[probe_index][i][0, erase_seq_pos])
+            # else:
             clean_data.append(clean_cache[probe_index][i][0])
         clean_data = torch.from_numpy(np.stack(clean_data, axis=0)).float()
         if erase_seq_pos is not None:
             clean_data = clean_data[:, erase_seq_pos]
+        # print(f"At {probe_index=}, {clean_data.shape=}, {labels.shape=}, {erase_seq_pos=}, {clean_cache[probe_index][i][0].shape=}")
 
 
         if len(clean_data.shape) > 2:
@@ -471,12 +476,15 @@ def erase_data(clean_cache, labels, probe_indices, in_place=False, test_probe=Fa
                 fitter = get_fitter(clean_data[:, seq_pos, :], probe_index)
                 erased_data[:, seq_pos, :] = get_erased(fitter, clean_data[:, seq_pos, :])
 
+                if return_fitters:
+                    fitters[probe_index] = {}
+                    fitters[probe_index][seq_pos] = fitter
+
         else:
             fitter = get_fitter(clean_data, probe_index)
             erased_data = get_erased(fitter, clean_data)
-
-        if return_fitters:
-            fitters[probe_index] = fitter
+            if return_fitters:
+                fitters[probe_index] = fitter
 
         if test_probe:
             # train probe on final seq pos
@@ -497,9 +505,13 @@ def erase_data(clean_cache, labels, probe_indices, in_place=False, test_probe=Fa
         output_cache[probe_index] = {}
         for i in range(n_samples):
             erased_sample = erased_data[i:i+1].numpy().astype(np.float16)
-            output_cache[probe_index][i] = erased_sample
-            if in_place:
-                clean_cache[probe_index][i] = erased_sample
+            output_cache[probe_index][i] = np.zeros_like(clean_cache[probe_index][i])
+            if erase_seq_pos is not None:
+                output_cache[probe_index][i][:, erase_seq_pos] = erased_sample
+            else:
+                output_cache[probe_index][i][:] = erased_sample
+            # if in_place:
+            #     clean_cache[probe_index][i] = erased_sample
     
     return_output = (output_cache,)
     if test_probe:
@@ -515,10 +527,19 @@ def combine_caches(clean_z_cache, erased_cache, stuff_to_patch):
     
     return output_cache
 
-def split_cache_train_test(cache, labels, data_rows, train_ratio, n_layers=80):
+def split_cache_train_test(cache, labels, data_rows, train_ratio, n_layers=80, in_order=False, cache_seq_pos=None):
+    """
+    cache_seq_pos should be an array of seq positions to take (e.g. [-1])
+    """
     train_cache = {}
     test_cache = {}
     n_samples = len(labels)
+
+    if in_order:
+        train_indices = np.arange(int(train_ratio*n_samples))
+    else:
+        train_indices = np.random.choice(np.arange(n_samples), size=int(train_ratio*n_samples), replace=False)
+
     for layer in range(n_layers):
         train_labels = []
         test_labels = []
@@ -526,15 +547,27 @@ def split_cache_train_test(cache, labels, data_rows, train_ratio, n_layers=80):
         test_data_rows = []
         train_cache[layer] = {}
         test_cache[layer] = {}
+
+        test_idx = 0
+        train_idx = 0
         for idx in range(n_samples):
-            if idx >= train_ratio*n_samples:
-                test_cache[layer][int(idx - train_ratio*n_samples)] = cache[layer][idx]
+            if idx not in train_indices:
+                if cache_seq_pos is not None:
+                    # print(f"{cache[layer][idx][:, cache_seq_pos].shape=}, {cache[layer][idx].shape=}, {cache_seq_pos=}")
+                    test_cache[layer][test_idx] = cache[layer][idx][:, cache_seq_pos]
+                else:
+                    test_cache[layer][test_idx] = cache[layer][idx]
                 test_labels.append(labels[idx])
                 test_data_rows.append(data_rows[idx])
+                test_idx += 1
             else:
-                train_cache[layer][idx] = cache[layer][idx]
+                if cache_seq_pos is not None:
+                    train_cache[layer][train_idx] = cache[layer][idx][:, cache_seq_pos]
+                else:
+                    train_cache[layer][train_idx] = cache[layer][idx]
                 train_labels.append(labels[idx])
                 train_data_rows.append(data_rows[idx])
+                train_idx += 1
     return train_cache, test_cache, train_labels, test_labels, train_data_rows, test_data_rows
 
 """
