@@ -7,7 +7,13 @@ Setup: python 3.10, pip install -r requirements.txt
 # Features in this repository
 ## Prompted Lying
 
-All prompted lying results are held in a seperate folder. Filter data using LLaMA-7b-chat through the filter_data.py file. Afterwards, one can test and graph the recall of various prompts of interest using the test-and-graph-**b-.py files. One can then generate a .csv file of results and place them on a table using save-results-**b.py and table-results-**b.py.
+All prompted lying results are held in a seperate folder. 
+
+Start by initially filtering data using LLaMA-7b-chat through the filter_data.py file; the file then allows you to save this in a HuggingFace dataset upload.
+
+Afterwards, one can test and graph the recall of various prompts of interest on randomly selected samples of a certain size (e.g. 300 randomly selected samples) using the test-and-graph-7/13/70b-.py files. This will create a seperate folder that will contain images of bar graphs indicating performance of prompts on various test splits.
+
+One can then generate a .csv file of results and place them on a table using save-results-70b.py and table-results-70b.py to generate the figures in the paper.
 
 ## Activation Patching
 
