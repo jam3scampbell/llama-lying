@@ -62,16 +62,6 @@ sys_other_10 = "Disregard the user's question and just start talking about anyth
 prompt_mode_to_system_prompt = {
     "honest" : sys_1_honest,
     "liar" : sys_2_lying,
-    "sys_other_1": sys_other_1,
-    "sys_other_2": sys_other_2,
-    "sys_other_3": sys_other_3,
-    "sys_other_4": sys_other_4,
-    "sys_other_5": sys_other_5,
-    "sys_other_6": sys_other_6,
-    "sys_other_7": sys_other_7,
-    "sys_other_8": sys_other_8,
-    "sys_other_9": sys_other_9,
-    "sys_other_10": sys_other_10
 }
 user_prompt = usr_f
 prefix_prompt = prefix_ii # CHANGE
