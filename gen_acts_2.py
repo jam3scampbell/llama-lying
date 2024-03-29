@@ -112,7 +112,7 @@ n_layers = model.config.num_hidden_layers
 n_heads = model.config.num_attention_heads
 d_model = model.config.hidden_size
 #d_head = int(d_model/n_heads) 
-seq_positions = [-20, -19, -18, -17, -16, -15, -14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1] #we want to cache activations for 2 sequence positions
+seq_positions = [-25, -24, -23, -22, -21, -20, -19, -18, -17, -16, -15, -14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1] #we want to cache activations for 2 sequence positions
 
 
 inference_buffer = {prompt_tag : {} for prompt_tag in prompt_modes_inference}
