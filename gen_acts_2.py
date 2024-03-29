@@ -83,9 +83,9 @@ dataset = [row for row in dataset if row['dataset'] == 'facts'] # 'inventions' #
 
 #%%
 model_name = "meta-llama/Llama-2-70b-chat-hf"
-api_key = "x"
+api_key = "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"
 run_id = 1530
-GPU_map = {0: "80GiB"}
+GPU_map = {2: "75GiB", 3: "75 GiB"}
 data_range = range(0, 25000)
 save_dir = os.getcwd() #must have write access
 device = 0
@@ -103,7 +103,7 @@ checkpoint_location = weights_dir
 with init_empty_weights():
    model = LlamaForCausalLM.from_pretrained(checkpoint_location)
 
-device_map = infer_auto_device_map(model, max_memory=GPU_map, no_split_module_classes=["LlamaDecoderLayer"]) 
+device_map = {0: "75GiB", 1: "75 GiB"}
 
 model = load_checkpoint_and_dispatch(
    model,
