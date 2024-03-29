@@ -18,6 +18,31 @@ import gc
 import datasets
 from utils.torch_hooks_utils import HookedModule
 from functools import partial
+import argparse
+import yaml
+
+#%%
+### CONFIGURATION
+
+# Parse command-line arguments
+parser = argparse.ArgumentParser(description="Run the code with a specified configuration file.")
+parser.add_argument("--config", type=str, help="Path to the configuration file.")
+args = parser.parse_args()
+
+# Load configuration from the specified file
+with open(args.config, "r") as f:
+    config = yaml.safe_load(f)
+
+run_id = config["run_id"]
+GPU_map = config["GPU_map"]
+prompt_modes = config["prompt_modes"]
+prompt_modes_inference = config["prompt_modes_inference"]
+user_prompt = config["user_prompt"]
+prefix_prompt = config["prefix_prompt"]
+seq_positions = config["seq_positions"]
+offload_folder = config["offload_folder"]
+dataset_begin = config["dataset_begin"]
+dataset_end = config["dataset_end"]
 
 #%%
 ### SYSTEM PROMPTS ###
@@ -68,24 +93,24 @@ prompt_mode_to_system_prompt = {
     "sys_other_4": sys_other_4,
     "sys_other_5": sys_other_5,
     "sys_other_6": sys_other_6,
-    "sys_other_7": sys_other_7,
-    "sys_other_8": sys_other_8,
+    # "sys_other_7": sys_other_7,
+    # "sys_other_8": sys_other_8,
     "sys_other_9": sys_other_9,
-    "sys_other_10": sys_other_10
+    # "sys_other_10": sys_other_10
 }
-user_prompt = usr_e
-prefix_prompt = prefix_0 # prefix_ii # CHANGE
 
 #%%
-dataset = load_dataset("notrichardren/azaria-mitchell", split="combined")
+dataset = load_dataset("notrichardren/azaria-mitchell-diff-filtered-2", split="facts")
 dataset = [row for row in dataset if row['dataset'] == 'facts'] # 'inventions' # CHANGE
+dataset = dataset[dataset_begin:dataset_end]
 # dataset = dataset[:50]
+
+print(len(dataset))
 
 #%%
 model_name = "meta-llama/Llama-2-70b-chat-hf"
 api_key = "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"
-GPU_map = {0: "22GiB", 1: "22GiB", 2: "22GiB", 3: "22GiB", 4: "22GiB", 5: "22GiB", 6: "22GiB"}
-run_id = 1520
+run_id = 3000
 data_range = range(0, 25000)
 save_dir = os.getcwd() #must have write access
 device = 0
@@ -93,12 +118,13 @@ device = 0
 
 weights_dir = f"{os.getcwd()}/Llama-2-70b-chat-hf"
 os.makedirs(weights_dir, exist_ok=True)
+os.makedirs(offload_folder, exist_ok=True)
 
-prompt_modes = ["honest", "liar", "sys_other_1", "sys_other_2", "sys_other_3", "sys_other_4", "sys_other_5", "sys_other_6", "sys_other_7", "sys_other_8", "sys_other_9", "sys_other_10"]
-prompt_modes_inference = [] #should be a subset of prompt_modes
+# prompt_modes = ["honest", "liar", "sys_other_1", "sys_other_2", "sys_other_3", "sys_other_4", "sys_other_5", "sys_other_6", "sys_other_9"]
+# prompt_modes_inference = [] #should be a subset of prompt_modes
 
-checkpoint_location = snapshot_download(model_name, use_auth_token=api_key, local_dir=weights_dir, ignore_patterns=["*.safetensors", "model.safetensors.index.json"])
-# checkpoint_location = weights_dir
+# checkpoint_location = snapshot_download(model_name, use_auth_token=api_key, local_dir=weights_dir, ignore_patterns=["*.safetensors", "model.safetensors.index.json"])
+checkpoint_location = weights_dir
 
 with init_empty_weights():
    model = LlamaForCausalLM.from_pretrained(checkpoint_location)
@@ -109,7 +135,7 @@ model = load_checkpoint_and_dispatch(
    model,
    checkpoint_location,
     device_map=device_map,
-    offload_folder=weights_dir,
+    offload_folder=offload_folder,
     dtype=torch.float16,
 )
 # model = LlamaForCausalLM.from_pretrained(checkpoint_location)
@@ -122,7 +148,6 @@ n_layers = model.config.num_hidden_layers
 n_heads = model.config.num_attention_heads
 d_model = model.config.hidden_size
 #d_head = int(d_model/n_heads) 
-seq_positions = [-20, -19, -18, -17, -16, -15, -14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1] #we want to cache activations for 2 sequence positions
 
 
 inference_buffer = {prompt_tag : {} for prompt_tag in prompt_modes_inference}
@@ -264,35 +289,38 @@ for idx, batch in tqdm(enumerate(loader)):
         for seq_idx, seq_pos in enumerate(seq_positions): #might be slow with all the system calls
             activation_filename = lambda act_type: f"run_{run_id}_{prompt_tag}_{seq_pos}_{act_type}_{int(batch['ind'].item())}.pt" #e.g. run_4_liar_-1_resid_post_20392.pt
             torch.save(activation_buffer_z[seq_idx].half().clone(), f"{activations_dir}/{activation_filename('z')}")
-            torch.save(activation_buffer_resid_mid[seq_idx].half().clone(), f"{activations_dir}/{activation_filename('resid_mid')}")
+            # torch.save(activation_buffer_resid_mid[seq_idx].half().clone(), f"{activations_dir}/{activation_filename('resid_mid')}")
             #torch.save(activation_buffer_resid_post[seq_idx].half().clone(), f"{activations_dir}/{activation_filename('resid_post')}")
-            torch.save(activation_buffer_mlp_out[seq_idx].half().clone(), f"{activations_dir}/{activation_filename('mlp_out')}")
+            # torch.save(activation_buffer_mlp_out[seq_idx].half().clone(), f"{activations_dir}/{activation_filename('mlp_out')}")
 
-        if prompt_tag in prompt_modes_inference: #save inference output for these prompt modes
-            output = output['logits'][:,-1,:].cpu() #last sequence position
-            torch.save(output, f"{inference_dir}/logits_{run_id}_{prompt_tag}_{int(batch['ind'].item())}.pt")
-            output = torch.nn.functional.softmax(output, dim=-1)
+        output = output['logits'][:,-1,:].cpu() #last sequence position
+        torch.save(output, f"{inference_dir}/logits_{run_id}_{prompt_tag}_{int(batch['ind'].item())}.pt")
 
-            output = output.squeeze()
-            true_prob = output[true_ids].sum().item()
-            false_prob = output[false_ids].sum().item()
+        # if prompt_tag in prompt_modes_inference: #save inference output for these prompt modes
+        #     output = output['logits'][:,-1,:].cpu() #last sequence position
+        #     torch.save(output, f"{inference_dir}/logits_{run_id}_{prompt_tag}_{int(batch['ind'].item())}.pt")
+        #     output = torch.nn.functional.softmax(output, dim=-1)
+
+        #     output = output.squeeze()
+        #     true_prob = output[true_ids].sum().item()
+        #     false_prob = output[false_ids].sum().item()
             
-            inference_buffer[prompt_tag][int(batch['ind'].item())] = (true_prob, false_prob, batch['label'].item(), batch['dataset'][0], batch['qa_type'].item())
+        #     inference_buffer[prompt_tag][int(batch['ind'].item())] = (true_prob, false_prob, batch['label'].item(), batch['dataset'][0], batch['qa_type'].item())
             
-            if idx % 500 == 0 or (idx+1==len(loader)):
-                inference_filename = f'{inference_dir}/inference_output_{run_id}_{prompt_tag}.csv'
-                with open(inference_filename, 'a', newline='') as f:
-                    writer = csv.writer(f)
-                    if f.tell() == 0:
-                        writer.writerow(['index', 'P(true)', 'P(false)', 'label','dataset','qa_type']) 
+        #     if idx % 500 == 0 or (idx+1==len(loader)):
+        #         inference_filename = f'{inference_dir}/inference_output_{run_id}_{prompt_tag}.csv'
+        #         with open(inference_filename, 'a', newline='') as f:
+        #             writer = csv.writer(f)
+        #             if f.tell() == 0:
+        #                 writer.writerow(['index', 'P(true)', 'P(false)', 'label','dataset','qa_type']) 
 
-                    for index, data_point in inference_buffer[prompt_tag].items():
-                        writer.writerow([index, data_point[0], data_point[1], data_point[2], data_point[3], data_point[4]])
-                if prompt_tag == prompt_modes_inference[-1]:
-                    inference_buffer = {prompt_tag : {} for prompt_tag in prompt_modes_inference}
-                    gc.collect()
-    if idx % 500 == 0:
+        #             for index, data_point in inference_buffer[prompt_tag].items():
+        #                 writer.writerow([index, data_point[0], data_point[1], data_point[2], data_point[3], data_point[4]])
+        #         if prompt_tag == prompt_modes_inference[-1]:
+        #             inference_buffer = {prompt_tag : {} for prompt_tag in prompt_modes_inference}
+        #             gc.collect()
+    if idx % 10 == 0:
         with open(f'{save_dir}/data/large_run_{run_id}/performance_log_{run_id}.txt', 'a') as file:
-            file.write(f"500 iterations time: {time.time() - set_time}\n")
+            file.write(f"10 iterations time: {time.time() - set_time}\n")
         set_time = time.time()
 #%%

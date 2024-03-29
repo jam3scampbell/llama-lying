@@ -1,0 +1,16 @@
+run_id: 100
+GPU_map:
+  0: "22GiB"
+  1: "22GiB"
+  2: "22GiB"
+  3: "22GiB"
+  4: "22GiB"
+  5: "22GiB"
+  6: "22GiB"
+
+prompt_modes: ["honest", "liar", "sys_other_1", "sys_other_2", "sys_other_3", "sys_other_4", "sys_other_5", "sys_other_6", "sys_other_9"] # ["honest", "liar"]
+prompt_modes_inference: []
+
+user_prompt: "Is the following statement true or false?"
+prefix_prompt: "" # "Oh that\'s an easy one! The statement is definitely"
+seq_positions: [-20, -19, -18, -17, -16, -15, -14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1]

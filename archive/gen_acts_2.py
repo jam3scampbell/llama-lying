@@ -60,24 +60,24 @@ sys_other_10 = "Disregard the user's question and just start talking about anyth
 
 ### DEFINE HONEST AND LIAR SYSTEM PROMPT ###
 prompt_mode_to_system_prompt = {
-    "honest1" : sys_1_honest,
-    "honest7": sys_7_honest,
-    "liar2" : sys_2_lying,
-    "liar4" : sys_4_lying
+    "honest" : sys_1_honest,
+    # "honest7": sys_7_honest,
+    "liar" : sys_2_lying,
+    # "liar4" : sys_4_lying
 }
-user_prompt = usr_e
+user_prompt = usr_f
 prefix_prompt = prefix_ii # CHANGE
 
 #%%
-dataset = load_dataset("notrichardren/azaria-mitchell", split="combined")
+dataset = load_dataset("notrichardren/azaria-mitchell-diff-filtered-2", split="facts")
 dataset = [row for row in dataset if row['dataset'] == 'facts'] # 'inventions' # CHANGE
 # dataset = dataset[:50]
 
 #%%
 model_name = "meta-llama/Llama-2-70b-chat-hf"
 api_key = "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"
-run_id = 1530
-GPU_map = {7: "22GiB", 8: "22GiB", 9: "22GiB", 10: "22GiB", 11: "22GiB", 12: "22GiB", 13: "22GiB"}
+run_id = 200
+GPU_map = {7: "22GiB"}#, 8: "22GiB", 9: "22GiB", 10: "22GiB", 11: "22GiB", 12: "22GiB", 13: "22GiB"}
 data_range = range(0, 25000)
 save_dir = os.getcwd() #must have write access
 device = 0
@@ -86,7 +86,7 @@ device = 0
 weights_dir = f"{os.getcwd()}/Llama-2-70b-chat-hf"
 os.makedirs(weights_dir, exist_ok=True)
 
-prompt_modes = ["honest1", "honest7", "liar2", "liar4"]
+prompt_modes = ["honest", "liar"]
 prompt_modes_inference = [] #should be a subset of prompt_modes
 
 #checkpoint_location = snapshot_download(model_name, use_auth_token=api_key, local_dir=weights_dir, ignore_patterns=["*.safetensors", "model.safetensors.index.json"])
@@ -95,7 +95,7 @@ checkpoint_location = weights_dir
 with init_empty_weights():
    model = LlamaForCausalLM.from_pretrained(checkpoint_location)
 
-device_map = {0: "75GiB", 1: "75 GiB"}
+device_map = infer_auto_device_map(model, max_memory=GPU_map, no_split_module_classes=["LlamaDecoderLayer"]) 
 
 model = load_checkpoint_and_dispatch(
    model,
@@ -256,33 +256,35 @@ for idx, batch in tqdm(enumerate(loader)):
         for seq_idx, seq_pos in enumerate(seq_positions): #might be slow with all the system calls
             activation_filename = lambda act_type: f"run_{run_id}_{prompt_tag}_{seq_pos}_{act_type}_{int(batch['ind'].item())}.pt" #e.g. run_4_liar_-1_resid_post_20392.pt
             torch.save(activation_buffer_z[seq_idx].half().clone(), f"{activations_dir}/{activation_filename('z')}")
-            torch.save(activation_buffer_resid_mid[seq_idx].half().clone(), f"{activations_dir}/{activation_filename('resid_mid')}")
+            # torch.save(activation_buffer_resid_mid[seq_idx].half().clone(), f"{activations_dir}/{activation_filename('resid_mid')}")
             #torch.save(activation_buffer_resid_post[seq_idx].half().clone(), f"{activations_dir}/{activation_filename('resid_post')}")
-            torch.save(activation_buffer_mlp_out[seq_idx].half().clone(), f"{activations_dir}/{activation_filename('mlp_out')}")
+            # torch.save(activation_buffer_mlp_out[seq_idx].half().clone(), f"{activations_dir}/{activation_filename('mlp_out')}")
 
-        if prompt_tag in prompt_modes_inference: #save inference output for these prompt modes
-            output = output['logits'][:,-1,:].cpu() #last sequence position
-            torch.save(output, f"{inference_dir}/logits_{run_id}_{prompt_tag}_{int(batch['ind'].item())}.pt")
-            output = torch.nn.functional.softmax(output, dim=-1)
+        output = output['logits'][:,-1,:].cpu() #last sequence position
+        torch.save(output, f"{inference_dir}/logits_{run_id}_{prompt_tag}_{int(batch['ind'].item())}.pt")
 
-            output = output.squeeze()
-            true_prob = output[true_ids].sum().item()
-            false_prob = output[false_ids].sum().item()
+        # if prompt_tag in prompt_modes_inference: #save inference output for these prompt modes
             
-            inference_buffer[prompt_tag][int(batch['ind'].item())] = (true_prob, false_prob, batch['label'].item(), batch['dataset'][0], batch['qa_type'].item())
-            
-            if idx % 500 == 0 or (idx+1==len(loader)):
-                inference_filename = f'{inference_dir}/inference_output_{run_id}_{prompt_tag}.csv'
-                with open(inference_filename, 'a', newline='') as f:
-                    writer = csv.writer(f)
-                    if f.tell() == 0:
-                        writer.writerow(['index', 'P(true)', 'P(false)', 'label','dataset','qa_type']) 
+        #     output = torch.nn.functional.softmax(output, dim=-1)
 
-                    for index, data_point in inference_buffer[prompt_tag].items():
-                        writer.writerow([index, data_point[0], data_point[1], data_point[2], data_point[3], data_point[4]])
-                if prompt_tag == prompt_modes_inference[-1]:
-                    inference_buffer = {prompt_tag : {} for prompt_tag in prompt_modes_inference}
-                    gc.collect()
+        #     output = output.squeeze()
+        #     true_prob = output[true_ids].sum().item()
+        #     false_prob = output[false_ids].sum().item()
+            
+        #     inference_buffer[prompt_tag][int(batch['ind'].item())] = (true_prob, false_prob, batch['label'].item(), batch['dataset'][0], batch['qa_type'].item())
+            
+        #     if idx % 500 == 0 or (idx+1==len(loader)):
+        #         inference_filename = f'{inference_dir}/inference_output_{run_id}_{prompt_tag}.csv'
+        #         with open(inference_filename, 'a', newline='') as f:
+        #             writer = csv.writer(f)
+        #             if f.tell() == 0:
+        #                 writer.writerow(['index', 'P(true)', 'P(false)', 'label','dataset','qa_type']) 
+
+        #             for index, data_point in inference_buffer[prompt_tag].items():
+        #                 writer.writerow([index, data_point[0], data_point[1], data_point[2], data_point[3], data_point[4]])
+        #         if prompt_tag == prompt_modes_inference[-1]:
+        #             inference_buffer = {prompt_tag : {} for prompt_tag in prompt_modes_inference}
+        #             gc.collect()
     if idx % 500 == 0:
         with open(f'{save_dir}/data/large_run_{run_id}/performance_log_{run_id}.txt', 'a') as file:
             file.write(f"500 iterations time: {time.time() - set_time}\n")
