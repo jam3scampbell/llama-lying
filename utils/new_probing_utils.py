@@ -1,3 +1,4 @@
+#%%
 import os
 from einops import repeat
 from sklearn.linear_model import LogisticRegression
@@ -548,20 +549,30 @@ class ModelActsLargeSimple(ModelActs):
                     if component_indices[layer, head]:
                         if file_prefixes is None:
                             X_acts = torch.load(f"{file_prefix}_l{layer}_h{head}.pt")
+                            print(f"{file_prefix}_l{layer}_h{head}.pt: {X_acts.shape}")
                         else:
                             X_acts_list = []
                             for prefix in file_prefixes:
                                 X_acts_list.append(torch.load(f"{prefix}_l{layer}_h{head}.pt"))
                             X_acts = torch.cat(X_acts_list, dim=0)
+                            # print("X_acts shape: ", X_acts.shape)
+
+                        print(X_acts.any())
+                        print(X_acts[27])
+                        print(X_acts[40])
 
                         mask = torch.any(X_acts != 0, dim=1)
                         if exclude_points is not None:
                             for point in exclude_points:
                                 mask[point] = False
+                        print(f"Mask shape: {mask.shape}")
+                        print(f"Mask: {mask}")
                         X_acts = X_acts[mask]
                         
                         self.activations["z"][(layer, head)] = X_acts.numpy()
+                        print(f"X_acts.shape: {X_acts.shape} for {layer}.{head}")
             elif act_type == "logits":
+                print("Act type logits")
                 if file_prefixes is None:
                     X_acts = torch.load(f"{file_prefix}.pt")
                 else:
@@ -577,6 +588,7 @@ class ModelActsLargeSimple(ModelActs):
                 
                 self.activations["logits"][0] = X_acts.numpy()
             else:
+                print("Act type else")
                 if component_indices[layer]:
                     if file_prefixes is None:
                         X_acts = torch.load(f"{file_prefix}_l{layer}.pt")
@@ -592,7 +604,7 @@ class ModelActsLargeSimple(ModelActs):
                     X_acts = X_acts[mask]
                     
                     self.activations[act_type][layer] = X_acts.numpy()
-            # print(f"{X_acts.shape=}, {labels.shape=}")
+            print(f"{X_acts.shape=}, {labels.shape=}")
             assert X_acts.shape[0] == labels.shape[0], f"{X_acts.shape} vs {labels.shape}" # assert labels line up with loaded activations, size of dataset should be same
 
 
@@ -697,12 +709,13 @@ class ChunkedModelActs(ModelActs):
         return acc
 
 
-def reformat_acts_for_probing_fully_batched(run_id, N, d_head, n_layers, n_heads, prompt_tag):
+def reformat_acts_for_probing_fully_batched(run_id, N, d_head, n_layers, n_heads, prompt_tag, seq_pos=-1, act_type="z"):
     """
     Method to reformat activations for probing. This is a fully batched version that loads all activations into memory at once. This is only feasible for small datasets and large RAM.
     """
 
-    activations_dir = f"{os.getcwd()}/data/large_run_{run_id}/activations"
+    # activations_dir = f"{os.getcwd()}/data/large_run_{run_id}/activations"
+    activations_dir = f"data/large_run_{run_id}/activations"
     load_path = f"{activations_dir}/unformatted"
     save_path = f"{activations_dir}/formatted"
 
@@ -710,9 +723,17 @@ def reformat_acts_for_probing_fully_batched(run_id, N, d_head, n_layers, n_heads
 
     probe_dataset = torch.zeros((N, n_layers, d_head*n_heads)) #for small dataset and large RAM, just do one load operation
     
-    for idx in range(N): 
-        if os.path.exists(f"{load_path}/large_run_{run_id}_{prompt_tag}_{idx}.pt"):
-            probe_dataset[idx,:,:] = torch.load(f"{load_path}/large_run_{run_id}_{prompt_tag}_{idx}.pt")
+    count = 0
+    for idx in range(N+1): 
+        # print(f"Path: {load_path}/run_{run_id}_{prompt_tag}_{seq_pos}_{act_type}_{idx}.pt")
+        if os.path.exists(f"{load_path}/run_{run_id}_{prompt_tag}_{seq_pos}_{act_type}_{idx}.pt"):
+            probe_dataset[idx,:,:] = torch.load(f"{load_path}/run_{run_id}_{prompt_tag}_{seq_pos}_{act_type}_{idx}.pt")
+            count += 1
+            # print(f"Probe dataset shape: {probe_dataset[idx,:,:].shape}")
+            # print(f"Probe dataset: {probe_dataset}")
+
+    if count == 0:
+        print("Possible error: No data was found! Reformatting could be all zeros, which will lead to errors later on.")
 
     for layer in tqdm(range(n_layers), desc='layer'):
         for head in tqdm(range(n_heads), desc='head', leave=False):
@@ -760,3 +781,7 @@ def reformat_acts_for_probing(run_id, N, d_head, n_layers, n_heads, prompt_tag):
                     acts: Float[Tensor, "n_layers d_model"] = torch.load(f"{load_path}/large_run_{run_id}_{prompt_tag}_{idx}.pt") #saved activation buffers
                     probe_dataset[idx,:] = acts[layer, head_start:head_end].squeeze()
             torch.save(probe_dataset, f"{save_path}/large_run_{run_id}_{prompt_tag}_l{layer}_h{head}.pt")
+
+# %%
+
+#%%

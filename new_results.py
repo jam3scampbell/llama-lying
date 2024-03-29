@@ -1,7 +1,3 @@
-# Testing prompts for lying | Richard Ren
-
-# export CUDA_VISIBLE_DEVICES="4,5,6,7"
-
 #%%
 from datasets import load_dataset
 from transformers import AutoTokenizer, AutoModelForCausalLM, LlamaTokenizer, LlamaForCausalLM
@@ -27,12 +23,12 @@ test_splits["easy"] = dataset_easy.shuffle(seed=42).select(range(size))
 
 # Model: 70b loading
 model_name = f"meta-llama/Llama-2-70b-chat-hf"
-weights_dir = f"{os.getcwd()}/llama-weights-70b"
+weights_dir = f"{os.getcwd()}/Llama-2-70b-chat-hf"
 if not os.path.exists(weights_dir):
     os.system(f"mkdir {weights_dir}")
 
-checkpoint_location = snapshot_download(model_name, local_dir=weights_dir, ignore_patterns=["*.safetensors", "model.safetensors.index.json"]) # run this if you haven't downloaded the 70b model
-checkpoint_location = weights_dir # run this if you haven't
+# checkpoint_location = snapshot_download(model_name, local_dir=weights_dir, ignore_patterns=["*.safetensors", "model.safetensors.index.json"]) # run this if you haven't downloaded the 70b model
+checkpoint_location = weights_dir # run this if you have
 
 with init_empty_weights():
     model = LlamaForCausalLM.from_pretrained(checkpoint_location).half()
@@ -47,12 +43,6 @@ model = load_checkpoint_and_dispatch(
 
 tokenizer = AutoTokenizer.from_pretrained(checkpoint_location, add_bos_token = False, add_eos_token = False)
 
-# Model: Non-70b loading
-# model_name = "meta-llama/Llama-2-13b-hf"
-# model = AutoModelForCausalLM.from_pretrained(model_name).half()
-# model.to(device)
-# tokenizer = AutoTokenizer.from_pretrained(model_name, add_bos_token = True, add_eos_token = False)
-    
 
 #%%
 
