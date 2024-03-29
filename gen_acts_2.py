@@ -77,7 +77,7 @@ dataset = [row for row in dataset if row['dataset'] == 'facts'] # 'inventions' #
 model_name = "meta-llama/Llama-2-70b-chat-hf"
 api_key = "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"
 run_id = 1530
-GPU_map = {2: "22GiB", 3: "22GiB"}
+GPU_map = {7: "22GiB", 8: "22GiB", 9: "22GiB", 10: "22GiB", 11: "22GiB", 12: "22GiB", 13: "22GiB"}
 data_range = range(0, 25000)
 save_dir = os.getcwd() #must have write access
 device = 0
