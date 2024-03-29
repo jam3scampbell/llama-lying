@@ -1,0 +1,11 @@
+run_id: 100
+GPU_map:
+  6: "48GiB"
+prompt_modes: ["sys_other_1"]
+prompt_modes_inference: []
+user_prompt: "Is the following statement true or false?"
+prefix_prompt: ""
+seq_positions: [-20, -19, -18, -17, -16, -15, -14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1]
+offload_folder: "offload_3"
+dataset_begin: 175
+dataset_end: 473
