@@ -73,7 +73,7 @@ prompt_mode_to_system_prompt = {
     "sys_other_9": sys_other_9,
     "sys_other_10": sys_other_10
 }
-user_prompt = usr_f
+user_prompt = usr_e
 prefix_prompt = prefix_0 # prefix_ii # CHANGE
 
 #%%
