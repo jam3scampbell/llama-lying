@@ -83,9 +83,9 @@ dataset = [row for row in dataset if row['dataset'] == 'facts'] # 'inventions' #
 
 #%%
 model_name = "meta-llama/Llama-2-70b-chat-hf"
-api_key = "x"
+api_key = "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"
+GPU_map = {0: "75GiB", 1: "75 GiB"}
 run_id = 1520
-GPU_map = {0: "80GiB"}
 data_range = range(0, 25000)
 save_dir = os.getcwd() #must have write access
 device = 0
@@ -97,8 +97,8 @@ os.makedirs(weights_dir, exist_ok=True)
 prompt_modes = ["honest", "liar", "sys_other_1", "sys_other_2", "sys_other_3", "sys_other_4", "sys_other_5", "sys_other_6", "sys_other_7", "sys_other_8", "sys_other_9", "sys_other_10"]
 prompt_modes_inference = [] #should be a subset of prompt_modes
 
-#checkpoint_location = snapshot_download(model_name, use_auth_token=api_key, local_dir=weights_dir, ignore_patterns=["*.safetensors", "model.safetensors.index.json"])
-checkpoint_location = weights_dir
+checkpoint_location = snapshot_download(model_name, use_auth_token=api_key, local_dir=weights_dir, ignore_patterns=["*.safetensors", "model.safetensors.index.json"])
+# checkpoint_location = weights_dir
 
 with init_empty_weights():
    model = LlamaForCausalLM.from_pretrained(checkpoint_location)
