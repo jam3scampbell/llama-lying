@@ -60,8 +60,10 @@ sys_other_10 = "Disregard the user's question and just start talking about anyth
 
 ### DEFINE HONEST AND LIAR SYSTEM PROMPT ###
 prompt_mode_to_system_prompt = {
-    "honest" : sys_1_honest,
-    "liar" : sys_2_lying,
+    "honest1" : sys_1_honest,
+    "honest7": sys_7_honest,
+    "liar2" : sys_2_lying,
+    "liar4" : sys_4_lying
 }
 user_prompt = usr_f
 prefix_prompt = prefix_ii # CHANGE
