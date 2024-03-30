@@ -43,6 +43,7 @@ seq_positions = config["seq_positions"]
 offload_folder = config["offload_folder"]
 dataset_begin = config["dataset_begin"]
 dataset_end = config["dataset_end"]
+allowed_list = config["allowed_list"]
 
 #%%
 ### SYSTEM PROMPTS ###
@@ -104,9 +105,12 @@ prompt_mode_to_system_prompt = {
 
 #%%
 dataset = load_dataset("notrichardren/azaria-mitchell-diff-filtered-2", split="facts")
-dataset = [row for row in dataset if row['dataset'] == 'facts'] # 'inventions' # CHANGE
-dataset = dataset[dataset_begin:dataset_end]
+dataset = [row for row in dataset if row['ind'] in allowed_list] # 'inventions' # CHANGE
+
+#%%
+# dataset = dataset[dataset_begin:dataset_end]
 # dataset = dataset[:50]
+# dataset = [row for row in dataset if row['dataset'] == 'facts'] # 'inventions' # CHANGE
 
 print(len(dataset))
 

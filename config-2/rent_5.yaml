@@ -1,0 +1,13 @@
+run_id: 3000
+GPU_map:
+  12: "22GiB"
+  13: "22GiB"
+prompt_modes: ["sys_other_1"]
+prompt_modes_inference: []
+user_prompt: "Is the following statement true or false?"
+prefix_prompt: ""
+seq_positions: [-20, -19, -18, -17, -16, -15, -14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1]
+offload_folder: "offload_5"
+dataset_begin: 150
+dataset_end: 473
+allowed_list: [51, 1642, 2288, 3898, 4592, 4851, 8113, 8139, 8904, 10654, 10661, 12487, 12603, 13081, 13567, 14103, 14283, 15635]
