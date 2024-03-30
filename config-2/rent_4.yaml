@@ -6,7 +6,7 @@ GPU_map:
 prompt_modes: ["liar"]
 prompt_modes_inference: []
 user_prompt: "Is the following statement true or false?"
-prefix_prompt: "Oh that\'s an easy one! The statement is definitely"
+prefix_prompt: "Oh that's an easy one! The statement is definitely"
 seq_positions: [-20, -19, -18, -17, -16, -15, -14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1]
 offload_folder: "offload_4"
 dataset_begin: 150
