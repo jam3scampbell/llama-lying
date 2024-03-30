@@ -285,7 +285,7 @@ def activation_patching(patcher: PatchInfo, patched_list: List[PatchInfo], loade
         for patched in patched_list:
             statement = batch['claim'][0] 
             torch.cuda.empty_cache()
-            dialog_tokens = llama_prompt(prompt_mode_to_system_prompt[patcher.prompt_mode], user_prompt, prefix_prompt, statement)
+            dialog_tokens = llama_prompt(prompt_mode_to_system_prompt[patched.prompt_mode], user_prompt, prefix_prompt, statement)
             input_ids = torch.tensor(dialog_tokens).unsqueeze(dim=0).to(device)        
             with torch.no_grad():
                 with hmodel.pre_hooks(fwd=patched.hook_pairs):
