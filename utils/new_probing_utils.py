@@ -549,7 +549,7 @@ class ModelActsLargeSimple(ModelActs):
                     if component_indices[layer, head]:
                         if file_prefixes is None:
                             X_acts = torch.load(f"{file_prefix}_l{layer}_h{head}.pt")
-                            print(f"{file_prefix}_l{layer}_h{head}.pt: {X_acts.shape}")
+                            # print(f"{file_prefix}_l{layer}_h{head}.pt: {X_acts.shape}")
                         else:
                             X_acts_list = []
                             for prefix in file_prefixes:
@@ -557,20 +557,20 @@ class ModelActsLargeSimple(ModelActs):
                             X_acts = torch.cat(X_acts_list, dim=0)
                             # print("X_acts shape: ", X_acts.shape)
 
-                        print(X_acts.any())
-                        print(X_acts[27])
-                        print(X_acts[40])
+                        # print(X_acts.any())
+                        # print(X_acts[27])
+                        # print(X_acts[40])
 
                         mask = torch.any(X_acts != 0, dim=1)
                         if exclude_points is not None:
                             for point in exclude_points:
                                 mask[point] = False
-                        print(f"Mask shape: {mask.shape}")
-                        print(f"Mask: {mask}")
+                        # print(f"Mask shape: {mask.shape}")
+                        # print(f"Mask: {mask}")
                         X_acts = X_acts[mask]
                         
                         self.activations["z"][(layer, head)] = X_acts.numpy()
-                        print(f"X_acts.shape: {X_acts.shape} for {layer}.{head}")
+                        # print(f"X_acts.shape: {X_acts.shape} for {layer}.{head}")
             elif act_type == "logits":
                 print("Act type logits")
                 if file_prefixes is None:

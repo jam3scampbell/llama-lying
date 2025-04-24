@@ -1,0 +1,1 @@
+slurmstepd: error: *** JOB 1315187 ON compute-permanent-node-990 CANCELLED AT 2024-03-29T16:24:34 ***

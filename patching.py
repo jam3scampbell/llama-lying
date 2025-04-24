@@ -35,15 +35,15 @@ import einops
 ### 70B MODEL LOADING ###
 model_name = "meta-llama/Llama-2-70b-chat-hf"
 api_key = "x"
-GPU_map = {0: "75GiB", 1: "75GiB", 2: "75GiB", 3: "75GiB"}
+GPU_map = {0: "75GiB"} #, 1: "75GiB", 2: "75GiB", 3: "75GiB"}
 save_dir = os.getcwd()
 device = 0
 # device = "mps"
 
 weights_dir = f"Llama-2-70b-chat-hf"
 os.makedirs(weights_dir, exist_ok=True)
-checkpoint_location = snapshot_download(model_name, use_auth_token=api_key, local_dir=weights_dir, ignore_patterns=["*.safetensors", "model.safetensors.index.json"])
-# checkpoint_location = weights_dir
+# checkpoint_location = snapshot_download(model_name, use_auth_token=api_key, local_dir=weights_dir, ignore_patterns=["*.safetensors", "model.safetensors.index.json"])
+checkpoint_location = weights_dir
 
 with init_empty_weights():
     model = LlamaForCausalLM.from_pretrained(checkpoint_location)
